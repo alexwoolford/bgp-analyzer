@@ -144,9 +144,7 @@ pub fn build_org_map_from_peeringdb(
 
     info!(
         orgs = map.len(),
-        skipped_glue,
-        skipped_heuristic,
-        "built OrgMap from PeeringDB"
+        skipped_glue, skipped_heuristic, "built OrgMap from PeeringDB"
     );
     Ok(map)
 }
@@ -179,10 +177,7 @@ fn fetch_all_nets(
     Ok(out)
 }
 
-fn fetch_orgs_by_ids(
-    client: &reqwest::blocking::Client,
-    ids: &[u64],
-) -> Result<Vec<PdbOrg>> {
+fn fetch_orgs_by_ids(client: &reqwest::blocking::Client, ids: &[u64]) -> Result<Vec<PdbOrg>> {
     let mut out = Vec::new();
     for (i, chunk) in ids.chunks(100).enumerate() {
         let id_list = chunk

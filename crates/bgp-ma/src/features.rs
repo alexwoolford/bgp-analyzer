@@ -301,12 +301,16 @@ pub fn score_backtest(
     }
 }
 
-pub fn write_pair_features_jsonl(path: impl AsRef<Path>, features: &[AsnPairFeature]) -> Result<()> {
+pub fn write_pair_features_jsonl(
+    path: impl AsRef<Path>,
+    features: &[AsnPairFeature],
+) -> Result<()> {
     let path = path.as_ref();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
+    let file =
+        std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
     let mut w = std::io::BufWriter::new(file);
     use std::io::Write;
     for f in features {
@@ -322,7 +326,8 @@ pub fn write_ma_events_jsonl(path: impl AsRef<Path>, events: &[MaEvent]) -> Resu
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let file = std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
+    let file =
+        std::fs::File::create(path).with_context(|| format!("creating {}", path.display()))?;
     let mut w = std::io::BufWriter::new(file);
     use std::io::Write;
     for ev in events {
@@ -378,7 +383,10 @@ mod tests {
         let sparse = filter_sparse_events(&events, &SparseConfig::default());
         assert_eq!(sparse.len(), 2);
         assert!(sparse.iter().all(|e| {
-            matches!((e.asn_a, e.asn_b), (Some(65000), Some(65001)) | (Some(65001), Some(65000)))
+            matches!(
+                (e.asn_a, e.asn_b),
+                (Some(65000), Some(65001)) | (Some(65001), Some(65000))
+            )
         }));
     }
 }

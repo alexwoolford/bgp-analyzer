@@ -98,7 +98,12 @@ impl PairStateStore {
         Ok(())
     }
 
-    pub fn merge_day(&mut self, features: &[AsnPairFeature], as_of: DateTime<Utc>, retain_days: i64) {
+    pub fn merge_day(
+        &mut self,
+        features: &[AsnPairFeature],
+        as_of: DateTime<Utc>,
+        retain_days: i64,
+    ) {
         for f in features {
             let key = pair_key(f.asn_lo, f.asn_hi);
             let e = self.pairs.entry(key).or_insert_with(|| PairStateEntry {
@@ -324,6 +329,37 @@ mod tests {
             clean_drop_reason(1, 2, Some("org:a"), Some("org:b"), &leasing),
             None
         );
+    }
+
+    #[test]
+    fn signal_envelope_schema_fields() {
+        let env = SignalEnvelope {
+            schema_version: 1,
+            source: "bgp_analyzer".into(),
+            kind: "network_contact".into(),
+            as_of: Utc.with_ymd_and_hms(2026, 8, 14, 0, 30, 0).unwrap(),
+            prior_as_of: Utc.with_ymd_and_hms(2026, 8, 13, 0, 30, 0).unwrap(),
+            asn_a: 1,
+            asn_b: 2,
+            org_a: None,
+            org_b: None,
+            domains_a: vec![],
+            domains_b: vec![],
+            prefixes_moved: 2,
+            prefix_move_days: 1,
+            new_adj_days: 0,
+            upstream_converge_days: 0,
+            persistence_days: 0,
+            score: 5,
+            event_kinds: vec!["prefix_move".into()],
+            suppress_flags: vec![],
+        };
+        let v = serde_json::to_value(&env).unwrap();
+        assert_eq!(v["source"], "bgp_analyzer");
+        assert_eq!(v["kind"], "network_contact");
+        assert_eq!(v["schema_version"], 1);
+        assert!(v.get("tile").is_none());
+        assert!(v.get("corroboration_only").is_none());
     }
 
     #[test]

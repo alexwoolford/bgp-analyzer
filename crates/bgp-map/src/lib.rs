@@ -8,9 +8,7 @@
 
 mod peeringdb;
 
-pub use peeringdb::{
-    build_org_map_from_peeringdb, write_org_map_json, PeeringDbBuildOptions,
-};
+pub use peeringdb::{build_org_map_from_peeringdb, write_org_map_json, PeeringDbBuildOptions};
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -65,12 +63,7 @@ impl Default for SubjectHeuristics {
 
 impl SubjectHeuristics {
     /// Return true if this ASN is eligible as a network-contact subject.
-    pub fn is_subject(
-        &self,
-        asn: u32,
-        glue: &GlueSet,
-        prefix_count: Option<u32>,
-    ) -> bool {
+    pub fn is_subject(&self, asn: u32, glue: &GlueSet, prefix_count: Option<u32>) -> bool {
         if self.exclude_glue && glue.contains(asn) {
             return false;
         }
@@ -138,9 +131,9 @@ impl GlueSet {
             if line.is_empty() || line.starts_with('#') {
                 continue;
             }
-            let asn: u32 = line.parse().map_err(|_| {
-                MapError::InvalidAsn(format!("line {}: `{line}`", lineno + 1))
-            })?;
+            let asn: u32 = line
+                .parse()
+                .map_err(|_| MapError::InvalidAsn(format!("line {}: `{line}`", lineno + 1)))?;
             set.insert(asn);
         }
         info!(glue_asns = set.len(), "loaded glue ASN suppress list");
@@ -151,9 +144,9 @@ impl GlueSet {
     /// [`from_file`] with [`fixtures/glue-asns.txt`](../../fixtures/glue-asns.txt) in prod.
     pub fn builtin() -> Self {
         const BUILTIN: &[u32] = &[
-            16509, 14618, 15169, 36040, 396982, 8075, 13335, 20940, 54113, 16625,
-            174, 209, 286, 701, 1239, 1299, 2914, 3257, 3320, 3356, 3491, 6453,
-            6461, 6762, 6830, 7018, 3561, 7922, 714, 32934, 13414, 2906,
+            16509, 14618, 15169, 36040, 396982, 8075, 13335, 20940, 54113, 16625, 174, 209, 286,
+            701, 1239, 1299, 2914, 3257, 3320, 3356, 3491, 6453, 6461, 6762, 6830, 7018, 3561,
+            7922, 714, 32934, 13414, 2906,
         ];
         let mut set = GlueSet::new();
         for &asn in BUILTIN {
@@ -252,11 +245,7 @@ impl OrgMap {
     pub fn orgs_for_asn(&self, asn: u32) -> Vec<&OrgRecord> {
         self.asn_to_orgs
             .get(&asn)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.orgs.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.orgs.get(id)).collect())
             .unwrap_or_default()
     }
 
@@ -264,11 +253,7 @@ impl OrgMap {
         let d = normalize_domain(domain);
         self.domain_to_orgs
             .get(&d)
-            .map(|ids| {
-                ids.iter()
-                    .filter_map(|id| self.orgs.get(id))
-                    .collect()
-            })
+            .map(|ids| ids.iter().filter_map(|id| self.orgs.get(id)).collect())
             .unwrap_or_default()
     }
 

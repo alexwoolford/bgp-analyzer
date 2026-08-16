@@ -16,6 +16,15 @@ edition = "2021"
 license = "MIT"
 authors = ["BGP Analyzer Contributors"]
 
+[workspace.lints.rust]
+unused = "warn"
+
+# Keep Clippy light: CI uses `-D warnings` on the default set.
+# Prefer fixing real issues over a pedantic deny list (see domain_status for that bar).
+[workspace.lints.clippy]
+too_many_arguments = "allow"
+manual_is_multiple_of = "allow"
+
 [workspace.dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
@@ -31,9 +40,6 @@ bgpkit-broker = "0.12"
 bgpkit-parser = "0.19"
 valley-free = "0.3"
 indexmap = "2"
-parquet = { version = "54", default-features = false, features = ["arrow", "zstd"] }
-arrow-array = "54"
-arrow-schema = "54"
 oneio = "0.19"
 csv = "1"
 

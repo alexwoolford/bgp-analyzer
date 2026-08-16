@@ -11,3 +11,6 @@ ipnet-trie = { workspace = true }
 indexmap = { workspace = true }
 serde = { workspace = true }
 bgp-rpki = { workspace = true }
+
+[lints]
+workspace = true

@@ -85,9 +85,8 @@ impl LeakDetector {
         reader
             .read_to_end(&mut bytes)
             .with_context(|| format!("reading AS-rel from {path_or_url}"))?;
-        let topology = Topology::from_caida(bytes.as_slice()).map_err(|e| {
-            DetectError::Parse(format!("{e:?}"))
-        })?;
+        let topology = Topology::from_caida(bytes.as_slice())
+            .map_err(|e| DetectError::Parse(format!("{e:?}")))?;
         info!(source = path_or_url, "loaded CAIDA AS relationships");
         Ok(Self { topology })
     }

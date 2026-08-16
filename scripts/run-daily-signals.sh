@@ -69,7 +69,21 @@ except Exception as e:
 
 if built:
     try:
-        ts = datetime.fromisoformat(built.replace("Z", "+00:00"))
+        # Rust chrono may emit nanoseconds; Python <3.11 fromisoformat is picky.
+        s = built.replace("Z", "+00:00")
+        if "." in s:
+            head, rest = s.split(".", 1)
+            frac = ""
+            tz = ""
+            for i, ch in enumerate(rest):
+                if ch.isdigit():
+                    frac += ch
+                else:
+                    tz = rest[i:]
+                    break
+            frac = (frac + "000000")[:6]
+            s = f"{head}.{frac}{tz}"
+        ts = datetime.fromisoformat(s)
         age_days = (datetime.now(timezone.utc) - ts.astimezone(timezone.utc)).total_seconds() / 86400.0
     except Exception as e:
         print(f"org-map age check: bad built_at={built!r}: {e}", file=sys.stderr)

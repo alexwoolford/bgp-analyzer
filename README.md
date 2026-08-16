@@ -32,6 +32,7 @@ Installs under `/opt/bgp-analyzer`, state under `/var/lib/bgp-analyzer`, and ena
 - [docs/DAILY_OPS.md](docs/DAILY_OPS.md) — ops and systemd
 - [docs/BACKTEST.md](docs/BACKTEST.md) — historical RIB windows
 - [docs/LEAD_LAG_VERDICT.md](docs/LEAD_LAG_VERDICT.md) — evaluation headline
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [LICENSE](LICENSE)
 
 ## Workspace
 

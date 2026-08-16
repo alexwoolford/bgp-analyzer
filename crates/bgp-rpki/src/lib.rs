@@ -81,12 +81,7 @@ impl RoasTrie {
                 set.entries.push(roa);
             }
             None => {
-                self.trie.insert(
-                    prefix,
-                    RoaSet {
-                        entries: vec![roa],
-                    },
-                );
+                self.trie.insert(prefix, RoaSet { entries: vec![roa] });
             }
         }
         self.count += 1;
@@ -187,21 +182,17 @@ pub fn load_roas(path_or_url: &str) -> Result<RoasTrie> {
 
 fn resolve_columns(headers: &[String]) -> Result<(usize, usize, usize, bool)> {
     let find = |candidates: &[&str]| {
-        headers
-            .iter()
-            .position(|h| candidates.iter().any(|c| h == c || h.replace('_', " ") == *c))
+        headers.iter().position(|h| {
+            candidates
+                .iter()
+                .any(|c| h == c || h.replace('_', " ") == *c)
+        })
     };
 
     if let (Some(a), Some(p), Some(m)) = (
         find(&["asn", "as", "origin", "origin asn", "origin_asn"]),
         find(&["ip prefix", "prefix", "ip_prefix", "ipprefix"]),
-        find(&[
-            "max length",
-            "maxlen",
-            "max_length",
-            "maxlength",
-            "max len",
-        ]),
+        find(&["max length", "maxlen", "max_length", "maxlength", "max len"]),
     ) {
         return Ok((a, p, m, false));
     }
@@ -235,8 +226,8 @@ fn row_from_fields(
         return Ok(None);
     }
 
-    let origin_asn = parse_asn(asn_raw)
-        .map_err(|e| RpkiError::InvalidRow(format!("ASN `{asn_raw}`: {e}")))?;
+    let origin_asn =
+        parse_asn(asn_raw).map_err(|e| RpkiError::InvalidRow(format!("ASN `{asn_raw}`: {e}")))?;
     let prefix = IpNet::from_str(fields[prefix_idx].trim())
         .map_err(|e| RpkiError::InvalidRow(format!("prefix: {e}")))?;
     let max_length: u8 = fields[maxlen_idx]
@@ -252,10 +243,7 @@ fn row_from_fields(
 }
 
 fn parse_asn(raw: &str) -> Result<u32> {
-    let s = raw
-        .trim()
-        .trim_start_matches("AS")
-        .trim_start_matches("as");
+    let s = raw.trim().trim_start_matches("AS").trim_start_matches("as");
     Ok(s.parse::<u32>()?)
 }
 
@@ -276,22 +264,10 @@ mod tests {
             origin_asn: 13335,
         });
 
-        assert_eq!(
-            trie.validate(v4("1.0.1.0/24"), 13335),
-            RpkiState::Valid
-        );
-        assert_eq!(
-            trie.validate(v4("1.0.1.0/24"), 64500),
-            RpkiState::Invalid
-        );
-        assert_eq!(
-            trie.validate(v4("1.0.1.0/25"), 13335),
-            RpkiState::Invalid
-        );
-        assert_eq!(
-            trie.validate(v4("8.8.8.0/24"), 15169),
-            RpkiState::Unknown
-        );
+        assert_eq!(trie.validate(v4("1.0.1.0/24"), 13335), RpkiState::Valid);
+        assert_eq!(trie.validate(v4("1.0.1.0/24"), 64500), RpkiState::Invalid);
+        assert_eq!(trie.validate(v4("1.0.1.0/25"), 13335), RpkiState::Invalid);
+        assert_eq!(trie.validate(v4("8.8.8.0/24"), 15169), RpkiState::Unknown);
     }
 
     #[test]
@@ -303,17 +279,8 @@ mod tests {
         );
         let trie = load_roas(path).unwrap();
         assert_eq!(trie.len(), 2);
-        assert_eq!(
-            trie.validate(v4("1.1.1.0/24"), 13335),
-            RpkiState::Valid
-        );
-        assert_eq!(
-            trie.validate(v4("1.1.1.0/24"), 64500),
-            RpkiState::Invalid
-        );
-        assert_eq!(
-            trie.validate(v4("8.8.8.0/24"), 15169),
-            RpkiState::Valid
-        );
+        assert_eq!(trie.validate(v4("1.1.1.0/24"), 13335), RpkiState::Valid);
+        assert_eq!(trie.validate(v4("1.1.1.0/24"), 64500), RpkiState::Invalid);
+        assert_eq!(trie.validate(v4("8.8.8.0/24"), 15169), RpkiState::Valid);
     }
 }

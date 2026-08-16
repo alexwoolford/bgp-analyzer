@@ -99,7 +99,11 @@ impl RibSnapshot {
                 best = match best {
                     None => Some(entry),
                     Some(cur) => {
-                        let cur_len = rib.interner.as_path(cur.as_path_id).map(|p| p.len()).unwrap_or(0);
+                        let cur_len = rib
+                            .interner
+                            .as_path(cur.as_path_id)
+                            .map(|p| p.len())
+                            .unwrap_or(0);
                         let new_len = rib
                             .interner
                             .as_path(entry.as_path_id)
@@ -116,7 +120,9 @@ impl RibSnapshot {
                 };
             }
             let Some(entry) = best else { continue };
-            let Some(origin) = entry.origin_asn else { continue };
+            let Some(origin) = entry.origin_asn else {
+                continue;
+            };
             let path = rib
                 .interner
                 .as_path(entry.as_path_id)
@@ -183,7 +189,11 @@ fn upstream_of_origin(as_path: &[u32], origin: u32) -> Option<u32> {
 }
 
 /// Watchlist-constrained adjacency pairs (sorted tuple).
-fn watchlist_adjacencies(path: &[u32], subjects: &HashSet<u32>, glue: &GlueSet) -> HashSet<(u32, u32)> {
+fn watchlist_adjacencies(
+    path: &[u32],
+    subjects: &HashSet<u32>,
+    glue: &GlueSet,
+) -> HashSet<(u32, u32)> {
     let mut path: Vec<u32> = path.to_vec();
     path.dedup();
     let mut out = HashSet::new();
@@ -309,7 +319,9 @@ pub fn diff_snapshots(
             }
             let org_a = org_map.org_for_asn(*origin);
             let org_b = org_map.org_for_asn(up);
-            if org_a.is_some() && org_b.is_some() && org_a.map(|o| &o.org_id) == org_b.map(|o| &o.org_id)
+            if org_a.is_some()
+                && org_b.is_some()
+                && org_a.map(|o| &o.org_id) == org_b.map(|o| &o.org_id)
             {
                 continue;
             }
@@ -371,7 +383,8 @@ pub fn diff_snapshots(
         }
         let base = b.max(1) as f64;
         let rel = delta.abs() as f64 / base;
-        if rel < cfg.footprint_rel_threshold && delta.abs() < (cfg.footprint_abs_threshold as i64 * 4)
+        if rel < cfg.footprint_rel_threshold
+            && delta.abs() < (cfg.footprint_abs_threshold as i64 * 4)
         {
             continue;
         }
@@ -468,12 +481,7 @@ fn event_matches_case(ev: &MaEvent, case: &EvalCase) -> bool {
     }
 }
 
-fn asn_pair_matches(
-    ev_a: Option<u32>,
-    ev_b: Option<u32>,
-    case_a: u32,
-    case_b: u32,
-) -> bool {
+fn asn_pair_matches(ev_a: Option<u32>, ev_b: Option<u32>, case_a: u32, case_b: u32) -> bool {
     match (ev_a, ev_b) {
         (Some(a), Some(b)) => (a == case_a && b == case_b) || (a == case_b && b == case_a),
         _ => false,
@@ -483,8 +491,8 @@ fn asn_pair_matches(
 /// Load eval cases from JSONL (one [`EvalCase`] per non-empty line).
 pub fn load_eval_cases(path: impl AsRef<Path>) -> Result<Vec<EvalCase>> {
     let path = path.as_ref();
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let mut cases = Vec::new();
     for (i, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -501,8 +509,8 @@ pub fn load_eval_cases(path: impl AsRef<Path>) -> Result<Vec<EvalCase>> {
 /// Load M&A events from JSONL.
 pub fn load_ma_events(path: impl AsRef<Path>) -> Result<Vec<MaEvent>> {
     let path = path.as_ref();
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let mut events = Vec::new();
     for (i, line) in text.lines().enumerate() {
         let line = line.trim();
@@ -634,7 +642,9 @@ mod tests {
         let events = diff_snapshots(&before, &after, &map, &glue, &cfg);
         assert!(events.iter().any(|e| e.kind == MaEventKind::NewAdj));
         assert!(events.iter().any(|e| e.kind == MaEventKind::FootprintStep));
-        assert!(events.iter().any(|e| e.kind == MaEventKind::UpstreamConverge));
+        assert!(events
+            .iter()
+            .any(|e| e.kind == MaEventKind::UpstreamConverge));
     }
 
     #[test]

@@ -122,7 +122,38 @@ Wrappers use `flock` (Linux) so overlapping timer runs fail fast instead of doub
   current -> …
 ```
 
-Upgrades: `git pull` (or new tag) → re-run `sudo ./deploy/install.sh` (env file at `/opt/bgp-analyzer/etc/bgp-analyzer.env` is preserved if already present). Review output: `/var/lib/bgp-analyzer/signals/inbox.jsonl`.
+Upgrades: `git pull` (or new tag) → re-run `sudo ./deploy/install.sh` (env file at `/opt/bgp-analyzer/etc/bgp-analyzer.env` is preserved if already present).
+
+### Collecting signals (after install)
+
+```bash
+# Append-only review feed (each JSON line is one network-contact signal)
+sudo -u bgp less /var/lib/bgp-analyzer/signals/inbox.jsonl
+
+# One UTC calendar day
+sudo -u bgp less /var/lib/bgp-analyzer/signals/signals-YYYY-MM-DD.jsonl
+```
+
+Each record includes UTC observation times `as_of` (later RIB day) and `prior_as_of` (prior snapshot). Dated files use `signals-YYYY-MM-DD.jsonl`. Job wall-clock: `journalctl -u bgp-signals.service`.
+
+### Verify install
+
+```bash
+systemctl list-timers 'bgp-*'
+journalctl -u bgp-signals.service -u bgp-org-map.service -n 50 --no-pager
+du -sh /var/lib/bgp-analyzer   # focused snapshots; pruned via --retain-days
+```
+
+Manual oneshots:
+
+```bash
+sudo systemctl start bgp-org-map.service    # PeeringDB refresh (also on weekly timer)
+sudo systemctl start bgp-signals.service    # today’s UTC day
+# or pin a calendar day:
+sudo -u bgp bash -lc 'set -a; source /opt/bgp-analyzer/etc/bgp-analyzer.env; set +a; /opt/bgp-analyzer/scripts/run-daily-signals.sh 2024-06-02'
+```
+
+First day after install only stores a snapshot; the next UTC day (or a second pinned date) emits signals.
 
 ## Outputs (reviewable)
 
