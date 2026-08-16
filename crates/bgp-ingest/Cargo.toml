@@ -1,0 +1,13 @@
+[package]
+name = "bgp-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MRT archive discovery and streaming via bgpkit-broker and bgpkit-parser"
+
+[dependencies]
+anyhow = { workspace = true }
+bgpkit-broker = { workspace = true }
+bgpkit-parser = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

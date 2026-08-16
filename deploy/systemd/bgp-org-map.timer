@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly BGP PeeringDB org-map refresh
+Documentation=file:///opt/bgp-analyzer/docs/DAILY_OPS.md
+
+[Timer]
+OnCalendar=Sun *-*-* 01:00:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

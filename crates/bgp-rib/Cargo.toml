@@ -1,0 +1,13 @@
+[package]
+name = "bgp-rib"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Mutable global RIB backed by ipnet-trie with attribute interning"
+
+[dependencies]
+ipnet = { workspace = true }
+ipnet-trie = { workspace = true }
+indexmap = { workspace = true }
+serde = { workspace = true }
+bgp-rpki = { workspace = true }

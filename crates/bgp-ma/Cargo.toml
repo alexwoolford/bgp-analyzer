@@ -1,0 +1,17 @@
+[package]
+name = "bgp-ma"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "BGP network-contact events: prefix moves, upstream convergence, adjacency, footprint steps"
+
+[dependencies]
+anyhow = { workspace = true }
+bgp-map = { workspace = true }
+bgp-rib = { workspace = true }
+chrono = { workspace = true }
+ipnet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

@@ -1,0 +1,20 @@
+[Unit]
+Description=BGP PeeringDB org-map refresh
+Documentation=file:///opt/bgp-analyzer/docs/DAILY_OPS.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=bgp
+Group=bgp
+Nice=10
+EnvironmentFile=-/opt/bgp-analyzer/etc/bgp-analyzer.env
+WorkingDirectory=/opt/bgp-analyzer
+ExecStart=/opt/bgp-analyzer/scripts/run-refresh-org-map.sh
+SyslogIdentifier=bgp-org-map
+ReadWritePaths=/var/lib/bgp-analyzer
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

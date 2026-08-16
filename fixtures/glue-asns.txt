@@ -1,0 +1,73 @@
+# Transit / hyperscaler / CDN / major IXP route-server ASNs treated as glue.
+# These may appear as path context but must not be M&A event *subjects*.
+# One ASN per line; lines starting with # are comments.
+#
+# Heuristic companion (see bgp_map::heuristics): mid-market watchlist ASNs
+# should also have modest announced prefix counts when known.
+
+# Hyperscalers / cloud
+16509
+14618
+15169
+36040
+396982
+8075
+13335
+20940
+54113
+16625
+22822
+32590
+
+# Large content / CDN / DNS
+15133
+20940
+13335
+16552
+36459
+714
+2906
+32934
+13414
+
+# Tier-1 / major transit (selected)
+174
+209
+286
+701
+1239
+1299
+2914
+3257
+3320
+3356
+3491
+5511
+6453
+6461
+6762
+6830
+7018
+12956
+3561
+
+# Large eyeball / regional telco (selected)
+7922
+7018
+20115
+22773
+6128
+20001
+2856
+5089
+5607
+3215
+5432
+1136
+6830
+9829
+4808
+4134
+4837
+9808
+56046

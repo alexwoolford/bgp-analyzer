@@ -1,0 +1,17 @@
+[package]
+name = "bgp-detect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Valley-free route-leak detection and alert types"
+
+[dependencies]
+anyhow = { workspace = true }
+bgp-rpki = { workspace = true }
+chrono = { workspace = true }
+ipnet = { workspace = true }
+oneio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+valley-free = { workspace = true }

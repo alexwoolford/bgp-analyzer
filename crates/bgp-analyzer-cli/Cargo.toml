@@ -1,0 +1,30 @@
+[package]
+name = "bgp-analyzer-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI for BGP M&A network-contact diffs (primary) and optional RPKI/valley-free cyber analysis"
+
+[[bin]]
+name = "bgp-analyzer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+arrow-array = { workspace = true }
+arrow-schema = { workspace = true }
+bgp-detect = { workspace = true }
+bgp-ingest = { workspace = true }
+bgp-ma = { workspace = true }
+bgp-map = { workspace = true }
+bgp-rib = { workspace = true }
+bgp-rpki = { workspace = true }
+bgpkit-parser = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+ipnet = { workspace = true }
+parquet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,16 @@
+[package]
+name = "bgp-rpki"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "RPKI Route Origin Validation (ROV) using ROA prefix tries"
+
+[dependencies]
+anyhow = { workspace = true }
+csv = { workspace = true }
+ipnet = { workspace = true }
+ipnet-trie = { workspace = true }
+oneio = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

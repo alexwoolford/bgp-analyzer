@@ -1,0 +1,11 @@
+**/target/
+**/*.rs.bk
+.DS_Store
+data/
+.env
+.idea/
+.vscode/
+context/
+alerts.jsonl
+private-research/
+*.log
