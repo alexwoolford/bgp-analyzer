@@ -280,9 +280,9 @@ dependencies = [
 
 [[package]]
 name = "bgpkit-broker"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c24495eb4b9022a5cdfca6f3a0f8fc8e6c714969f94ab68f15d3f49ad9ccba8"
+checksum = "5ea8939f569c3b93568f39003b0990225d6dc32b86e6b01f56b0de9a1aabadb1"
 dependencies = [
  "chrono",
  "dotenvy",
