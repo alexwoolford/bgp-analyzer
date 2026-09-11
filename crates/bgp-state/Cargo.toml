@@ -1,0 +1,21 @@
+[package]
+name = "bgp-state"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "STRICT sqlite system of record for BGP network-contact signals and org-map spine"
+
+[dependencies]
+anyhow = { workspace = true }
+bgp-ma = { workspace = true }
+bgp-map = { workspace = true }
+capturable-state = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -12,6 +12,29 @@ use serde::{Deserialize, Serialize};
 use crate::AsnPairFeature;
 use bgp_map::OrgMap;
 
+mod utc_iso_serde {
+    use chrono::{DateTime, NaiveDateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(dt: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        NaiveDateTime::parse_from_str(&s, "%Y-%m-%dT%H:%M:%SZ")
+            .map(|n| n.and_utc())
+            .or_else(|_| DateTime::parse_from_rfc3339(&s).map(|dt| dt.to_utc()))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 /// Marketplace / IP leasing ASNs that dominate dirty precision audits.
 pub const DEFAULT_LEASING_ASNS: &[u32] = &[
     834, // IPXO
@@ -25,7 +48,9 @@ pub struct SignalEnvelope {
     pub source: String,
     /// Stable product kind for this feed.
     pub kind: String,
+    #[serde(with = "utc_iso_serde")]
     pub as_of: DateTime<Utc>,
+    #[serde(with = "utc_iso_serde")]
     pub prior_as_of: DateTime<Utc>,
     pub asn_a: u32,
     pub asn_b: u32,

@@ -10,13 +10,13 @@ Useful as an **independent contact feed**. It is **not** a ranked deal list: off
 
 ```bash
 cargo build -p bgp-analyzer-cli --release
-./scripts/run-refresh-org-map.sh    # PeeringDB org map (periodic)
+BGP_DAILY_STATE=data/daily-review ./scripts/run-refresh-org-map.sh
 ./scripts/run-local-review.sh       # two UTC days → review inbox
 ```
 
-Review: `data/daily-review/signals/inbox.jsonl`
+Review: `data/daily-review/signals/inbox.jsonl` (lossy copy). Facts live in `data/daily-review/bgp-analyzer.sqlite`.
 
-Ongoing daily: `./scripts/run-daily-signals.sh`
+Ongoing daily: `./scripts/run-daily-signals.sh` (default state `data/daily`; refresh into that dir first).
 
 ## Deploy
 
@@ -30,6 +30,7 @@ Installs under `/opt/bgp-analyzer`, state under `/var/lib/bgp-analyzer`, and ena
 
 - [docs/MA_SIGNAL.md](docs/MA_SIGNAL.md) — product mechanics
 - [docs/DAILY_OPS.md](docs/DAILY_OPS.md) — ops and systemd
+- [docs/CAPTURE.md](docs/CAPTURE.md) — capture contract (work sqlite + `_outbox`)
 - [docs/BACKTEST.md](docs/BACKTEST.md) — historical RIB windows
 - [docs/LEAD_LAG_VERDICT.md](docs/LEAD_LAG_VERDICT.md) — evaluation headline
 - [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [LICENSE](LICENSE)
@@ -42,6 +43,7 @@ Installs under `/opt/bgp-analyzer`, state under `/var/lib/bgp-analyzer`, and ena
 | `bgp-rib` | Mutable `ipnet-trie` RIB + AS_PATH interning |
 | `bgp-map` | Glue ASN list + PeeringDB org map builder |
 | `bgp-ma` | Snapshot diff → network-contact events |
+| `bgp-state` | STRICT sqlite SoR + capturable-state `_outbox` |
 | `bgp-rpki` / `bgp-detect` | Optional cyber path |
 | `bgp-analyzer-cli` | `bgp-analyzer` binary |
 

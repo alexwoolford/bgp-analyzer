@@ -25,8 +25,8 @@ The ASN↔org↔domain map is **reference data**. PeeringDB changes over time; a
 
 | Cadence | Job | Behavior |
 |---------|-----|----------|
-| **Weekly** | `./scripts/run-refresh-org-map.sh` | Crawl PeeringDB → dated JSON + `current` symlink |
-| **Daily** | `./scripts/run-daily-signals.sh` | Use cached map only; **refuse** if missing or older than `ORG_MAP_MAX_AGE_DAYS` (default 14) |
+| **Weekly** | `./scripts/run-refresh-org-map.sh` | Crawl PeeringDB → work sqlite `orgs` / `org_map_runs`; dated JSON + `current` symlink is a local copy |
+| **Daily** | `./scripts/run-daily-signals.sh` | Load live orgs from sqlite; **refuse** if `org_map_runs.finished_at` is older than `ORG_MAP_MAX_AGE_DAYS` (default 14) |
 
 Daily does **not** crawl PeeringDB. Overlay (`BGP_ORG_MAP_OVERLAY`) is opt-in for local eval — do not set it in production.
 
@@ -37,8 +37,8 @@ Do **not** look at cyber `alerts.jsonl`. Product output is the daily signal inbo
 ```bash
 cargo build -p bgp-analyzer-cli --release
 
-# Org map once if you do not already have a fresh map (or reuse data/org-map-peeringdb.json)
-./scripts/run-refresh-org-map.sh
+# Org map once into the review state dir (sqlite SoR)
+BGP_DAILY_STATE=data/daily-review ./scripts/run-refresh-org-map.sh
 
 # Two consecutive UTC days (needs network for RouteViews RIBs)
 ./scripts/run-local-review.sh
@@ -116,7 +116,9 @@ Wrappers use `flock` (Linux) so overlapping timer runs fail fast instead of doub
   scripts/run-refresh-org-map.sh
   fixtures/glue-asns.txt
   etc/bgp-analyzer.env
-/var/lib/bgp-analyzer/           # snapshots, events, pair-state, signals
+/var/lib/bgp-analyzer/
+  bgp-analyzer.sqlite            # work sqlite (signals, orgs, runs, _outbox)
+  snapshots/  events/  signals/  # RIB hose + JSONL review copies
 /var/lib/bgp-analyzer/org-map/
   org-map-peeringdb-YYYY-MM-DD.json
   current -> …
@@ -129,6 +131,10 @@ Upgrades: `git pull` (or new tag) → re-run `sudo ./deploy/install.sh` (env fil
 ```bash
 # Append-only review feed (each JSON line is one network-contact signal)
 sudo -u bgp less /var/lib/bgp-analyzer/signals/inbox.jsonl
+
+# Work sqlite (system of record)
+sudo -u bgp sqlite3 /var/lib/bgp-analyzer/bgp-analyzer.sqlite \
+  "SELECT COUNT(*) FROM network_contact WHERE deleted_at IS NULL;"
 
 # One UTC calendar day
 sudo -u bgp less /var/lib/bgp-analyzer/signals/signals-YYYY-MM-DD.jsonl
@@ -155,17 +161,23 @@ sudo -u bgp bash -lc 'set -a; source /opt/bgp-analyzer/etc/bgp-analyzer.env; set
 
 First day after install only stores a snapshot; the next UTC day (or a second pinned date) emits signals.
 
+## State capture
+
+Work sqlite: `/var/lib/bgp-analyzer/bgp-analyzer.sqlite` (`db_name` `bgp-analyzer`). `capturable-state` v0.1.1 installs `_outbox` on `network_contact`, `orgs`, `signal_runs`, `org_map_runs`. JSONL under `signals/` is a post-commit review copy.
+
+systemd `ReadWritePaths` includes `-/var/lib/state-capture/announce` and `-/run/state`. `install.sh` adds `bgp` to group `state-capture` when that group exists. Env: `STATE_CAPTURE_SOCK`, `STATE_CAPTURE_ANNOUNCE_DIR`. Collector read access to `/var/lib/bgp-analyzer` is configured on the collector host, not in this crate. Contract: [CAPTURE.md](CAPTURE.md).
+
 ## Outputs (reviewable)
 
 Under the state dir (`data/daily/` locally, `/var/lib/bgp-analyzer/` in production — gitignored):
 
 | Path | Purpose |
 |------|---------|
-| `snapshots/rib-YYYY-MM-DD.json` | Rolling RIB origin snapshots |
-| `events/events-YYYY-MM-DD.jsonl` | Sparse day events |
+| `bgp-analyzer.sqlite` | Work sqlite: signals, orgs, run tables, `_outbox`; uncaptured `pair_state` |
+| `snapshots/rib-YYYY-MM-DD.json` | Rolling RIB origin snapshots (hose; not captured) |
+| `events/events-YYYY-MM-DD.jsonl` | Sparse day events (intermediate) |
 | `events/pair-features-YYYY-MM-DD.cleaned.jsonl` | Cleaned pairs for the day |
-| `pair-state.json` | ~30d persistence store |
-| `signals/signals-YYYY-MM-DD.jsonl` | Signal envelope |
+| `signals/signals-YYYY-MM-DD.jsonl` | Signal envelope (lossy review copy after commit) |
 | `signals/inbox.jsonl` | Append-only human review feed |
 
 ### Signal envelope (`schema_version: 1`)

@@ -21,6 +21,7 @@ bgp-ma = { workspace = true }
 bgp-map = { workspace = true }
 bgp-rib = { workspace = true }
 bgp-rpki = { workspace = true }
+bgp-state = { workspace = true }
 bgpkit-parser = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }

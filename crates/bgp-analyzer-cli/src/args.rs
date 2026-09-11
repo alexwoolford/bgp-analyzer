@@ -34,9 +34,12 @@ pub enum Commands {
 
 #[derive(Debug, Parser)]
 pub struct BuildOrgMapArgs {
-    /// Output org-map JSON path (prefer dated: data/org-map-peeringdb-YYYY-MM-DD.json).
-    #[arg(long, default_value = "data/org-map-peeringdb.json")]
-    pub output: PathBuf,
+    /// Work sqlite directory (`bgp-analyzer.sqlite` is the system of record).
+    #[arg(long, default_value = "data/daily")]
+    pub state_dir: PathBuf,
+    /// Optional JSON dump after sqlite commit (lossy local copy).
+    #[arg(long)]
+    pub output: Option<PathBuf>,
     /// Glue ASN suppress list (real public ASNs).
     #[arg(long, default_value = "fixtures/glue-asns.txt")]
     pub glue: PathBuf,
@@ -160,7 +163,7 @@ pub struct BacktestArgs {
 
 #[derive(Debug, Parser)]
 pub struct DailyArgs {
-    /// State directory (snapshots/ + events/ + signals/ + pair-state.json).
+    /// State directory (work sqlite + snapshots/ + events/ + signals/).
     #[arg(long, default_value = "data/daily")]
     pub state_dir: PathBuf,
     /// Calendar day to process (UTC), YYYY-MM-DD. Default: today UTC.
@@ -168,11 +171,15 @@ pub struct DailyArgs {
     pub date: Option<String>,
     #[arg(long, default_value = "route-views2")]
     pub collector: String,
+    /// Optional JSON org-map overlay / legacy merge on top of sqlite orgs.
     #[arg(long)]
-    pub org_map: PathBuf,
+    pub org_map: Option<PathBuf>,
     /// Optional org-map overlay JSON (same shape as build-org-map output).
     #[arg(long)]
     pub org_map_overlay: Option<PathBuf>,
+    /// Refuse if `org_map_runs.finished_at` is older than this many days.
+    #[arg(long, default_value_t = 14)]
+    pub org_map_max_age_days: i64,
     #[arg(long)]
     pub glue: Option<PathBuf>,
     /// Keep this many calendar days of snapshots (prune older).

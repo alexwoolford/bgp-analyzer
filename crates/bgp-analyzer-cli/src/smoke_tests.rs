@@ -63,6 +63,8 @@ fn daily_signal_json_schema_roundtrip() {
     assert_eq!(back.schema_version, 1);
     assert!(!line.contains("\"tile\""));
     assert!(!line.contains("corroboration"));
+    assert!(line.contains("2026-08-14T00:30:00Z"));
+    assert!(!line.contains("+00:00"));
     assert_eq!(back, env);
 }
 

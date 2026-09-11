@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Weekly PeeringDB org-map refresh: dated JSON + atomic current symlink.
-# Daily signal jobs consume $ORG_MAP_DIR/current (no PeeringDB crawl).
+# Weekly PeeringDB org-map refresh: sqlite SoR + dated JSON copy + current symlink.
+# Daily signal jobs read live orgs from $BGP_DAILY_STATE/bgp-analyzer.sqlite (no crawl).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="${BGP_ANALYZER_BIN:-$ROOT/target/release/bgp-analyzer}"
 GLUE="${BGP_GLUE:-$ROOT/fixtures/glue-asns.txt}"
+STATE="${BGP_DAILY_STATE:-$ROOT/data/daily}"
 ORG_MAP_DIR="${BGP_ORG_MAP_DIR:-$ROOT/data/org-map}"
 RETAIN="${BGP_ORG_MAP_RETAIN:-4}"
 LOCK="${BGP_ORG_MAP_LOCK:-$ORG_MAP_DIR/.refresh.lock}"
@@ -20,7 +21,7 @@ test -f "$GLUE" || {
   exit 1
 }
 
-mkdir -p "$ORG_MAP_DIR"
+mkdir -p "$ORG_MAP_DIR" "$STATE"
 
 acquire_lock() {
   if command -v flock >/dev/null 2>&1; then
@@ -44,10 +45,11 @@ OUT="$ORG_MAP_DIR/org-map-peeringdb-${DATE_UTC}.json"
 TMP="${OUT}.tmp.$$"
 
 echo "== refresh org-map =="
-echo "bin=$BIN out=$OUT"
+echo "bin=$BIN state=$STATE out=$OUT"
 
 "$BIN" build-org-map \
   --glue "$GLUE" \
+  --state-dir "$STATE" \
   --output "$TMP"
 
 mv -f "$TMP" "$OUT"
@@ -67,4 +69,5 @@ for f in $(ls -1t "$ORG_MAP_DIR"/org-map-peeringdb-*.json 2>/dev/null); do
 done
 
 CUR_TARGET="$(readlink "$ORG_MAP_DIR/current" 2>/dev/null || true)"
+echo "sqlite  → $STATE/bgp-analyzer.sqlite"
 echo "current → $ORG_MAP_DIR/current -> ${CUR_TARGET:-?}"

@@ -251,20 +251,24 @@ fn website_to_domain(website: &str) -> Option<String> {
     }
 }
 
-/// Write org map JSON wrapper for CLI consumption.
+/// Write org map JSON wrapper for CLI consumption (lossy local copy).
 ///
 /// PeeringDB is a **live** registry: `built_at` is crawl time, not historical BGP time.
-/// Prefer dated output paths such as `data/org-map-peeringdb-YYYY-MM-DD.json`.
-pub fn write_org_map_json(map: &OrgMap, path: impl AsRef<std::path::Path>) -> Result<()> {
+/// Pass a `utc_iso` instant (`YYYY-MM-DDTHH:MM:SSZ`); do not use `to_rfc3339()`.
+pub fn write_org_map_json(
+    map: &OrgMap,
+    path: impl AsRef<std::path::Path>,
+    built_at: &str,
+) -> Result<()> {
     #[derive(serde::Serialize)]
     struct Wrapper<'a> {
         source: &'static str,
-        built_at: String,
+        built_at: &'a str,
         orgs: Vec<&'a OrgRecord>,
     }
     let wrapper = Wrapper {
         source: "peeringdb",
-        built_at: chrono::Utc::now().to_rfc3339(),
+        built_at,
         orgs: map.orgs().collect(),
     };
     let file = std::fs::File::create(path.as_ref())?;

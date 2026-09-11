@@ -11,7 +11,7 @@ use bgp_ma::{
     eval_cases, eval_cases_against_features, filter_clean_features, filter_sparse_events,
     leasing_set, load_eval_cases, load_ma_events, score_backtest, write_ma_events_jsonl,
     write_pair_features_jsonl, write_signals_jsonl, AsnPairFeature, DiffConfig, EvalCase,
-    EvalCaseResult, MaEvent, MaEventKind, PairStateStore, RibSnapshot, SparseConfig,
+    EvalCaseResult, MaEvent, MaEventKind, RibSnapshot, SparseConfig,
 };
 use bgp_map::{
     build_org_map_from_peeringdb, write_org_map_json, GlueSet, OrgMap, PeeringDbBuildOptions,
@@ -19,6 +19,7 @@ use bgp_map::{
 };
 use bgp_rib::{Rib, RouteEntry};
 use bgp_rpki::{load_roas, RoasTrie, RpkiState};
+use bgp_state::{work_db_path, SignalRun, SignalRunStatus, WorkDb};
 use bgpkit_parser::models::ElemType;
 use bgpkit_parser::BgpElem;
 use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
@@ -28,9 +29,7 @@ use tracing::{info, warn};
 use crate::args::*;
 
 pub fn run_build_org_map(args: BuildOrgMapArgs) -> Result<()> {
-    if let Some(parent) = args.output.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+    let started_at = Utc::now();
     let glue = GlueSet::from_file(&args.glue)?;
     let opts = PeeringDbBuildOptions {
         heuristics: SubjectHeuristics::default(),
@@ -40,14 +39,26 @@ pub fn run_build_org_map(args: BuildOrgMapArgs) -> Result<()> {
     info!(
         glue = glue.len(),
         max_net_pages = ?args.max_net_pages,
+        state_dir = %args.state_dir.display(),
         "building org map from live PeeringDB (real data only)"
     );
     let map = build_org_map_from_peeringdb(&glue, &opts)?;
-    write_org_map_json(&map, &args.output)?;
+    std::fs::create_dir_all(&args.state_dir)?;
+    let sqlite = work_db_path(&args.state_dir);
+    let mut db = WorkDb::open(&sqlite)?;
+    let commit = db.commit_org_map(&map, started_at)?;
+    if let Some(output) = &args.output {
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        write_org_map_json(&map, output, &commit.built_at)?;
+        info!(path = %output.display(), "wrote org-map JSON copy");
+    }
     info!(
-        path = %args.output.display(),
-        orgs = map.len(),
-        "wrote PeeringDB org map"
+        sqlite = %sqlite.display(),
+        orgs = commit.org_count,
+        built_at = %commit.built_at,
+        "committed PeeringDB org map"
     );
     Ok(())
 }
@@ -337,6 +348,7 @@ pub fn run_backtest(args: BacktestArgs) -> Result<()> {
 }
 
 pub fn run_daily(args: DailyArgs) -> Result<()> {
+    let started_at = Utc::now();
     let day = match &args.date {
         Some(s) => parse_ymd(s)?,
         None => Utc::now().date_naive(),
@@ -344,12 +356,56 @@ pub fn run_daily(args: DailyArgs) -> Result<()> {
     let snap_dir = args.state_dir.join("snapshots");
     let events_dir = args.state_dir.join("events");
     let signals_dir = args.state_dir.join("signals");
-    let state_path = args.state_dir.join("pair-state.json");
     std::fs::create_dir_all(&snap_dir)?;
     std::fs::create_dir_all(&events_dir)?;
     std::fs::create_dir_all(&signals_dir)?;
 
-    let org_map = load_org_map(&args.org_map, None, args.org_map_overlay.as_ref())?;
+    let sqlite = work_db_path(&args.state_dir);
+    let mut db = WorkDb::open(&sqlite)?;
+    run_daily_after_open(
+        &args,
+        day,
+        started_at,
+        &mut db,
+        &sqlite,
+        &snap_dir,
+        &events_dir,
+        &signals_dir,
+    )
+    .inspect_err(|_| {
+        if let Err(mark) = db.commit_signal_run(&SignalRun {
+            as_of_date: day.to_string(),
+            as_of: day
+                .and_hms_opt(0, 30, 0)
+                .expect("00:30:00 is a valid time")
+                .and_utc(),
+            prior_as_of: None,
+            started_at,
+            status: SignalRunStatus::Error,
+            signal_count: 0,
+        }) {
+            warn!(error = %mark, "failed to record signal_runs status=error");
+        }
+    })
+}
+
+fn run_daily_after_open(
+    args: &DailyArgs,
+    day: NaiveDate,
+    started_at: DateTime<Utc>,
+    db: &mut WorkDb,
+    sqlite: &std::path::Path,
+    snap_dir: &std::path::Path,
+    events_dir: &std::path::Path,
+    signals_dir: &std::path::Path,
+) -> Result<()> {
+    let mut org_map = db.require_fresh_org_map(started_at, args.org_map_max_age_days)?;
+    if let Some(legacy) = &args.org_map {
+        apply_org_overlay(&mut org_map, legacy)?;
+    }
+    if let Some(overlay) = &args.org_map_overlay {
+        apply_org_overlay(&mut org_map, overlay)?;
+    }
     let glue = load_glue(args.glue.as_ref())?;
 
     let mut focus: std::collections::HashSet<u32> = std::collections::HashSet::new();
@@ -403,13 +459,23 @@ pub fn run_daily(args: DailyArgs) -> Result<()> {
         info!(path = %today_path.display(), "reusing today snapshot");
     }
 
-    let prior_path = find_prior_snapshot(&snap_dir, day)?;
+    let prior_path = find_prior_snapshot(snap_dir, day)?;
     let Some(prior_path) = prior_path else {
+        let today = RibSnapshot::load_json(&today_path)?;
+        db.commit_signal_run(&SignalRun {
+            as_of_date: day.to_string(),
+            as_of: today.as_of,
+            prior_as_of: None,
+            started_at,
+            status: SignalRunStatus::SnapshotOnly,
+            signal_count: 0,
+        })?;
         info!(
             %day,
+            sqlite = %sqlite.display(),
             "no prior snapshot in state dir; retained today only (run again tomorrow for a diff)"
         );
-        prune_snapshots(&snap_dir, day, args.retain_days)?;
+        prune_snapshots(snap_dir, day, args.retain_days)?;
         return Ok(());
     };
 
@@ -457,9 +523,8 @@ pub fn run_daily(args: DailyArgs) -> Result<()> {
     let cleaned_path = events_dir.join(format!("pair-features-{day}.cleaned.jsonl"));
     write_pair_features_jsonl(&cleaned_path, &cleaned)?;
 
-    let mut pair_state = PairStateStore::load(&state_path)?;
+    let mut pair_state = db.load_pair_state()?;
     pair_state.merge_day(&cleaned, after.as_of, args.pair_state_days);
-    pair_state.save(&state_path)?;
 
     let signals = build_signals(
         &cleaned,
@@ -468,6 +533,19 @@ pub fn run_daily(args: DailyArgs) -> Result<()> {
         before.as_of,
         Some(&pair_state),
     );
+    db.commit_daily(
+        &signals,
+        &pair_state,
+        &SignalRun {
+            as_of_date: day.to_string(),
+            as_of: after.as_of,
+            prior_as_of: Some(before.as_of),
+            started_at,
+            status: SignalRunStatus::Ok,
+            signal_count: signals.len() as i64,
+        },
+    )?;
+
     let signals_path = signals_dir.join(format!("signals-{day}.jsonl"));
     write_signals_jsonl(&signals_path, &signals)?;
     if !args.no_inbox {
@@ -483,11 +561,12 @@ pub fn run_daily(args: DailyArgs) -> Result<()> {
         dropped_clean = dropped.len(),
         signals = signals.len(),
         prior = %prior_path.display(),
+        sqlite = %sqlite.display(),
         signals_path = %signals_path.display(),
         "daily network-contact signals complete"
     );
 
-    prune_snapshots(&snap_dir, day, args.retain_days)?;
+    prune_snapshots(snap_dir, day, args.retain_days)?;
     Ok(())
 }
 
@@ -624,17 +703,22 @@ pub fn load_org_map(
 ) -> Result<OrgMap> {
     let mut org_map = OrgMap::from_json_file(path)?;
     if let Some(overlay) = overlay {
-        let overlay_map = OrgMap::from_json_file(overlay)?;
-        let n = overlay_map.len();
-        for org in overlay_map.orgs() {
-            org_map.insert(org.clone());
-        }
-        info!(overlay = %overlay.display(), orgs = n, "merged org-map overlay");
+        apply_org_overlay(&mut org_map, overlay)?;
     }
     if let Some(extra) = extra {
         org_map.enrich_domains_from_watchlist(extra)?;
     }
     Ok(org_map)
+}
+
+fn apply_org_overlay(map: &mut OrgMap, overlay: &PathBuf) -> Result<()> {
+    let overlay_map = OrgMap::from_json_file(overlay)?;
+    let n = overlay_map.len();
+    for org in overlay_map.orgs() {
+        map.insert(org.clone());
+    }
+    info!(overlay = %overlay.display(), orgs = n, "merged org-map overlay");
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

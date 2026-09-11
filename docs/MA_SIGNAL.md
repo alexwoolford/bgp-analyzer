@@ -21,7 +21,7 @@ Production does **not** need a long history in the hot path. Each day:
 1. Keep yesterday’s RIB snapshot
 2. Fetch today’s RIB → origin-collapsed snapshot (optionally focus-filtered to subject ASNs)
 3. Diff `T−1` vs `T` → events → sparse filter → same-org/leasing clean
-4. Update ~30d pair state; emit `signals/signals-YYYY-MM-DD.jsonl`
+4. Update ~30d pair state; upsert `network_contact` in the work sqlite; write `signals/signals-YYYY-MM-DD.jsonl` after commit
 
 Operator entrypoint: `./scripts/run-daily-signals.sh` (see [DAILY_OPS.md](DAILY_OPS.md)).
 
@@ -36,7 +36,7 @@ Operator entrypoint: `./scripts/run-daily-signals.sh` (see [DAILY_OPS.md](DAILY_
 
 - PeeringDB `net` + `org` (ASN, name, website → domains)
 - Optional `--extra-domains` enrichment on `ma-diff` (watchlist file; not a gate)
-- PeeringDB is a live registry: each crawl has `built_at`; prefer dated output paths. Refresh with a full rebuild.
+- PeeringDB is a live registry: each crawl writes `org_map_runs.built_at` (`utc_iso`); dated JSON is a local copy. Daily loads live `orgs` from sqlite.
 
 Attributes on each signal: `asn_a` / `asn_b`, `domains_a` / `domains_b`, `org_a` / `org_b`.
 
@@ -56,6 +56,7 @@ Snapshot `as_of` is the BGP window **`--end`**, not wall-clock build time.
 ```bash
 bgp-analyzer build-org-map \
   --glue fixtures/glue-asns.txt \
+  --state-dir data/daily \
   --output data/org-map/org-map-peeringdb-$(date -u +%F).json
 
 bgp-analyzer backtest \
@@ -66,7 +67,6 @@ bgp-analyzer backtest \
 
 bgp-analyzer daily \
   --state-dir data/daily \
-  --org-map data/org-map/current \
   --glue fixtures/glue-asns.txt \
   --focus-from-org-map
 

@@ -60,8 +60,10 @@ test -x "${BGP_ANALYZER_BIN:-$ROOT/target/release/bgp-analyzer}" || {
 
 echo "== local review =="
 echo "state=$STATE"
+echo "sqlite=$STATE/bgp-analyzer.sqlite"
 echo "day1=$DAY1 (snapshot only if empty state)"
 echo "day2=$DAY2 (diff → signals)"
+echo "hint: org map must already be in this state dir (BGP_DAILY_STATE=$STATE ./scripts/run-refresh-org-map.sh)"
 
 "$ROOT/scripts/run-daily-signals.sh" "$DAY1"
 "$ROOT/scripts/run-daily-signals.sh" "$DAY2"

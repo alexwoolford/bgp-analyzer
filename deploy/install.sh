@@ -50,6 +50,9 @@ NLOGIN="/usr/sbin/nologin"
 if ! id -u "$USER_NAME" >/dev/null 2>&1; then
   useradd --system --home-dir "$STATE" --shell "$NLOGIN" "$USER_NAME" || true
 fi
+if getent group state-capture >/dev/null 2>&1; then
+  usermod -aG state-capture "$USER_NAME" || true
+fi
 mkdir -p "$PREFIX"/{bin,scripts,fixtures,etc,docs} \
   "$STATE"/org-map \
   /etc/systemd/system
@@ -60,8 +63,18 @@ install -m 0755 "$ROOT/scripts/run-daily-signals.sh" "$PREFIX/scripts/run-daily-
 install -m 0755 "$ROOT/scripts/run-refresh-org-map.sh" "$PREFIX/scripts/run-refresh-org-map.sh"
 install -m 0644 "$ROOT/fixtures/glue-asns.txt" "$PREFIX/fixtures/glue-asns.txt"
 install -m 0644 "$ROOT/docs/DAILY_OPS.md" "$PREFIX/docs/DAILY_OPS.md"
-if [[ ! -f "$PREFIX/etc/bgp-analyzer.env" ]]; then
-  install -m 0644 "$ROOT/deploy/bgp-analyzer.env.example" "$PREFIX/etc/bgp-analyzer.env"
+ENV_DST="$PREFIX/etc/bgp-analyzer.env"
+if [[ ! -f "$ENV_DST" ]]; then
+  install -m 0644 "$ROOT/deploy/bgp-analyzer.env.example" "$ENV_DST"
+else
+  append_env_if_missing() {
+    local key="$1" value="$2"
+    if ! grep -qE "^${key}=" "$ENV_DST"; then
+      printf '\n%s=%s\n' "$key" "$value" >> "$ENV_DST"
+    fi
+  }
+  append_env_if_missing STATE_CAPTURE_SOCK /run/state/collect.sock
+  append_env_if_missing STATE_CAPTURE_ANNOUNCE_DIR /var/lib/state-capture/announce
 fi
 
 chown -R "$USER_NAME:$GROUP_NAME" "$STATE"
@@ -83,6 +96,7 @@ echo "== first org-map (blocking PeeringDB crawl) =="
 sudo -u "$USER_NAME" env \
   BGP_ANALYZER_BIN="$PREFIX/bin/bgp-analyzer" \
   BGP_GLUE="$PREFIX/fixtures/glue-asns.txt" \
+  BGP_DAILY_STATE="$STATE" \
   BGP_ORG_MAP_DIR="$STATE/org-map" \
   "$PREFIX/scripts/run-refresh-org-map.sh"
 
@@ -95,4 +109,5 @@ echo "  prefix=$PREFIX state=$STATE"
 echo "  timers: bgp-org-map.timer (weekly), bgp-signals.timer (daily)"
 echo "  logs: journalctl -u bgp-signals.service -u bgp-org-map.service"
 echo "  review: $STATE/signals/inbox.jsonl"
+echo "  sqlite: $STATE/bgp-analyzer.sqlite"
 echo "  edit: $PREFIX/etc/bgp-analyzer.env"
