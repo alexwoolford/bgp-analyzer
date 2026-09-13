@@ -1,8 +1,13 @@
 //! Build [`OrgMap`] from the live PeeringDB API (real network operator registrations).
+//!
+//! Every call paginates all of `/net` (unless [`PeeringDbBuildOptions::max_net_pages`]
+//! caps it). There is no `since` cursor: PeeringDB is slowly changing **reference
+//! data**. Incremental emit is sqlite `_outbox` in `bgp_state::WorkDb::commit_org_map`.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -13,9 +18,27 @@ use crate::{normalize_domain, GlueSet, OrgMap, OrgRecord, SubjectHeuristics};
 const PEERINGDB_NET: &str = "https://www.peeringdb.com/api/net";
 const PEERINGDB_ORG: &str = "https://www.peeringdb.com/api/org";
 const PAGE: usize = 250;
-/// Polite delay between successful page fetches.
-const PAGE_DELAY: Duration = Duration::from_millis(400);
+/// Anonymous PeeringDB cap is 20 req/min (≥3s). Docs also ask for ≥2s between queries.
+/// https://docs.peeringdb.com/howto/work_within_peeringdbs_query_limits/
+const MIN_INTERVAL: Duration = Duration::from_millis(3100);
 const MAX_RETRIES: u32 = 12;
+
+static LAST_HTTP: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn wait_rate_limit() {
+    let wait = match LAST_HTTP.lock() {
+        Ok(guard) => (*guard)
+            .map(|prev| MIN_INTERVAL.saturating_sub(prev.elapsed()))
+            .unwrap_or(Duration::ZERO),
+        Err(_) => Duration::ZERO,
+    };
+    if !wait.is_zero() {
+        thread::sleep(wait);
+    }
+    if let Ok(mut slot) = LAST_HTTP.lock() {
+        *slot = Some(Instant::now());
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct PdbList<T> {
@@ -59,8 +82,9 @@ impl Default for PeeringDbBuildOptions {
 
 /// Fetch PeeringDB nets + orgs and build a many-to-many [`OrgMap`].
 ///
-/// Glue ASNs are excluded as subjects. Domains come from PeeringDB `website` fields
-/// (org + net), normalized to hostnames — never invented.
+/// Glue ASNs are excluded as subjects. Prefix-size heuristics do not apply here
+/// (`is_subject` is called with `prefix_count = None`). Domains come from PeeringDB
+/// `website` fields (org + net), normalized to hostnames — never invented.
 pub fn build_org_map_from_peeringdb(
     glue: &GlueSet,
     opts: &PeeringDbBuildOptions,
@@ -153,6 +177,8 @@ fn fetch_all_nets(
     client: &reqwest::blocking::Client,
     opts: &PeeringDbBuildOptions,
 ) -> Result<Vec<PdbNet>> {
+    // Full `/net` pagination (limit/skip). Do not add `?since=` here: delete
+    // detection and a simple 2h oneshot beat an incremental cursor.
     let mut out = Vec::new();
     let mut skip = 0usize;
     let mut pages = 0usize;
@@ -172,7 +198,6 @@ fn fetch_all_nets(
             break;
         }
         skip += PAGE;
-        thread::sleep(PAGE_DELAY);
     }
     Ok(out)
 }
@@ -191,7 +216,6 @@ fn fetch_orgs_by_ids(client: &reqwest::blocking::Client, ids: &[u64]) -> Result<
         if (i + 1) % 20 == 0 {
             info!(chunks = i + 1, orgs = out.len(), "PeeringDB /org progress");
         }
-        thread::sleep(PAGE_DELAY);
     }
     Ok(out)
 }
@@ -203,19 +227,23 @@ fn get_json<T: for<'de> Deserialize<'de>>(
     let mut attempt = 0u32;
     loop {
         attempt += 1;
+        wait_rate_limit();
         let response = client
             .get(url)
             .send()
             .with_context(|| format!("GET {url}"))?;
         let status = response.status();
+        let retry_raw = response
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         if status.as_u16() == 429 || status.is_server_error() {
             if attempt > MAX_RETRIES {
                 bail!("gave up after {MAX_RETRIES} retries for {url} (last status {status})");
             }
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|v| v.to_str().ok())
+            let retry_after = retry_raw
+                .as_deref()
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or_else(|| 2u64.pow(attempt.min(6)));
             warn!(%status, retry_after, attempt, url, "PeeringDB rate limit / server error; backing off");
@@ -290,5 +318,11 @@ mod tests {
             website_to_domain("cloudflare.com").as_deref(),
             Some("cloudflare.com")
         );
+    }
+
+    #[test]
+    fn anonymous_interval_respects_20_per_minute() {
+        assert!(MIN_INTERVAL >= Duration::from_millis(3000));
+        assert!(MIN_INTERVAL >= Duration::from_secs(2));
     }
 }

@@ -30,6 +30,7 @@ Installs under `/opt/bgp-analyzer`, state under `/var/lib/bgp-analyzer`, and ena
 
 - [docs/MA_SIGNAL.md](docs/MA_SIGNAL.md) — product mechanics
 - [docs/DAILY_OPS.md](docs/DAILY_OPS.md) — ops and systemd
+- [docs/ORG_MAP.md](docs/ORG_MAP.md) — PeeringDB is reference data; RIB diff is the change stream
 - [docs/CAPTURE.md](docs/CAPTURE.md) — capture contract (work sqlite + `_outbox`)
 - [docs/BACKTEST.md](docs/BACKTEST.md) — historical RIB windows
 - [docs/LEAD_LAG_VERDICT.md](docs/LEAD_LAG_VERDICT.md) — evaluation headline

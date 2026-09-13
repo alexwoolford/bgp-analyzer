@@ -12,8 +12,8 @@ Pin: `capturable-state` git tag `v0.1.1` (not a path dep; do not copy `src/*.rs`
 |---|---|---|---|
 | `network_contact` | **yes** | after | Daily product. Downstream join on domains |
 | `signal_runs` | **yes** | after | Domain telemetry: did today’s UTC day finish? |
-| `org_map_runs` | **yes** | after | Domain telemetry: did the weekly PeeringDB crawl finish? |
-| `orgs` (ASN / org / domain spine) | **yes** | after | Join without re-crawling PeeringDB |
+| `org_map_runs` | **yes** | after | Domain telemetry: did the PeeringDB crawl finish? |
+| `orgs` (ASN / org / domain spine) | **yes** | after | Join names/domains without re-crawling. **Not** an M&A event stream |
 | `pair_state` | **no** | — | Derived (P8). Hard-prunes old pairs. Persistence counts live on the signal row |
 | RIB snapshots | **no** | — | Hose. Never attach triggers. Never `--snapshot` to “refresh” them |
 | Sparse events / pair-features JSONL | **no** | — | Intermediate |
@@ -32,7 +32,7 @@ Do not `collect --snapshot` this database to “refresh” RIB-sized files. Incr
 - Live rows that vanish on rerun get `deleted_at INTEGER` (soft-delete). Pair-state prune is a hard delete on the **uncaptured** table.
 - List fields (`domains_a`, `domains_b`, `event_kinds`, `suppress_flags`, org `asns` / `domains`) are comma-separated TEXT. Unnest downstream with `string_to_array` / `text[]`.
 - Absent org names: `NULL`, not `''`.
-- Org spine: `org_id` (`pdb:…`). Weekly crawl is change-aware; unchanged rows emit no extra outbox events. First crawl emitting ~N inserts is the real initial state.
+- Org spine: `org_id` (`pdb:…`). HTTP crawl is always a full `/net` pagination; sqlite commit is change-aware (unchanged rows emit no extra outbox events). First crawl emitting ~N inserts is the real initial join state — not a deal list. See [ORG_MAP.md](ORG_MAP.md).
 - Run tables: PK `as_of_date` (`YYYY-MM-DD`). Runs do not retract.
 - Downstream join key is **domain**. ASN / org is not 1:1 with a ticker.
 
@@ -50,7 +50,7 @@ Snapshot `as_of` is the BGP window `--end` (e.g. `00:30:00Z`), not wall-clock bu
 
 systemd oneshots write announce + nudge:
 
-- `ReadWritePaths=/var/lib/bgp-analyzer -/var/lib/state-capture/announce -/run/state`
+- `ReadWritePaths=/var/lib/bgp-analyzer /var/lib/state-capture/announce -/run/state` (announce is required when the collector is present; do not prefix it with `-` — that lets a failed bind stay EROFS)
 - `TimeoutStartSec=2h`
 - Env: `STATE_CAPTURE_SOCK=/run/state/collect.sock`, `STATE_CAPTURE_ANNOUNCE_DIR=/var/lib/state-capture/announce`
 - `install.sh` adds `bgp` to group `state-capture` when that group exists (socket is `0660`)

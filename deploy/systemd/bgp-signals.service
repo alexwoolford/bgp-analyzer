@@ -14,7 +14,7 @@ WorkingDirectory=/opt/bgp-analyzer
 ExecStart=/opt/bgp-analyzer/scripts/run-daily-signals.sh
 SyslogIdentifier=bgp-signals
 # State lives under /var/lib/bgp-analyzer (see EnvironmentFile).
-ReadWritePaths=/var/lib/bgp-analyzer -/var/lib/state-capture/announce -/run/state
+ReadWritePaths=/var/lib/bgp-analyzer /var/lib/state-capture/announce -/run/state
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true

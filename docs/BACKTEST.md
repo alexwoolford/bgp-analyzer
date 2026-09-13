@@ -29,7 +29,7 @@ Outputs under `--out-dir`:
 
 Re-run with `--skip-fetch` to reuse snapshots already on disk.
 
-**Attribution caveat:** PeeringDB is crawl-time, not historical. Prefer a dated org map near the study window when available.
+**Attribution caveat:** PeeringDB is crawl-time, not historical. Prefer a dated org map near the study window when available. Production does not need PeeringDB history — see [ORG_MAP.md](ORG_MAP.md).
 
 ## Pair features
 

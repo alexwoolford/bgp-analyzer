@@ -82,7 +82,9 @@ pub struct WorkDb {
 impl WorkDb {
     /// Open (or create) the work sqlite and install capture triggers.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_with(path.as_ref(), None, None)
+        let announce = std::env::var_os("STATE_CAPTURE_ANNOUNCE_DIR").map(PathBuf::from);
+        let sock = std::env::var_os("STATE_CAPTURE_SOCK").map(PathBuf::from);
+        Self::open_with(path.as_ref(), announce.as_deref(), sock.as_deref())
     }
 
     pub fn open_with(
@@ -107,6 +109,11 @@ impl WorkDb {
             let mut cfg = CaptureConfig::new(DB_NAME, path, &tables);
             cfg.announce_dir = announce_dir;
             cfg.sock = sock;
+            info!(
+                sqlite = %path.display(),
+                announce = announce_dir.map(|p| p.display().to_string()).unwrap_or_default(),
+                "capturable-state install"
+            );
             install(&conn, &cfg).context("capturable-state install")?
         };
         Ok(Self { conn, nudge })
@@ -223,6 +230,10 @@ impl WorkDb {
     }
 
     /// Upsert org spine + `org_map_runs` in one transaction, then nudge.
+    ///
+    /// The HTTP crawl is always exhaustive. This commit is the incremental layer:
+    /// unchanged orgs emit no extra `_outbox` rows; vanished orgs are soft-deleted.
+    /// First crawl ~N inserts is the join-spine initial state, not an M&A event list.
     pub fn commit_org_map(
         &mut self,
         map: &OrgMap,

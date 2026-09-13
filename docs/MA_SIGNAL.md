@@ -8,7 +8,7 @@ This repo ships a finished **network-contact** feed.
 
 Offline evaluation found the signal **weak alone** for M&A prediction—see [LEAD_LAG_VERDICT.md](LEAD_LAG_VERDICT.md). Treat `score` as **triage**, not P(deal).
 
-Ops: [DAILY_OPS.md](DAILY_OPS.md). Historical windows: [BACKTEST.md](BACKTEST.md).
+Ops: [DAILY_OPS.md](DAILY_OPS.md). Org map vs change stream: [ORG_MAP.md](ORG_MAP.md). Historical windows: [BACKTEST.md](BACKTEST.md).
 
 Valley-free / RPKI leak detection remains an optional cyber side channel (`bgp-analyzer analyze`).
 
@@ -28,15 +28,15 @@ Operator entrypoint: `./scripts/run-daily-signals.sh` (see [DAILY_OPS.md](DAILY_
 ## Subjects vs glue
 
 - **Glue ASNs** ([`fixtures/glue-asns.txt`](../fixtures/glue-asns.txt)): hyperscalers, CDNs, Tier-1 transit, large eyeballs. Path context only.
-- **Subjects**: mid-market ASNs from the PeeringDB-built org map that pass [`SubjectHeuristics`](../crates/bgp-map/src/lib.rs).
+- **Subjects**: ASNs from the PeeringDB-built org map that pass [`SubjectHeuristics`](../crates/bgp-map/src/lib.rs). Crawl-time filtering only drops glue (`prefix_count` is unknown), so the stored spine is broader than a prefix-size mid-market cut. Daily `--focus-from-org-map` uses that spine.
 
 ## Mapping
 
 [`OrgMap`](../crates/bgp-map/src/lib.rs) via `bgp-analyzer build-org-map`:
 
-- PeeringDB `net` + `org` (ASN, name, website → domains)
+- PeeringDB `net` + `org` (ASN, name, website → domains). Each HTTP crawl paginates all of `/net`; sqlite/`_outbox` commit is change-aware. This is attribution reference data, not the change stream ([ORG_MAP.md](ORG_MAP.md)).
 - Optional `--extra-domains` enrichment on `ma-diff` (watchlist file; not a gate)
-- PeeringDB is a live registry: each crawl writes `org_map_runs.built_at` (`utc_iso`); dated JSON is a local copy. Daily loads live `orgs` from sqlite.
+- PeeringDB is a live registry: each crawl writes `org_map_runs.built_at` (`utc_iso`); dated JSON is a local copy. Daily loads live `orgs` from sqlite and does not crawl.
 
 Attributes on each signal: `asn_a` / `asn_b`, `domains_a` / `domains_b`, `org_a` / `org_b`.
 

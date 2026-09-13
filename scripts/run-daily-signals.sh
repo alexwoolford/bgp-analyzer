@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quiet daily BGP network-contact signal emitter.
+# Quiet daily BGP network-contact signal emitter (the change stream).
 # Org map comes from work sqlite (no PeeringDB crawl). score is triage, not P(deal).
 set -euo pipefail
 

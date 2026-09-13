@@ -4,7 +4,7 @@
 //! is an attribute for downstream use (optional), never a 1:1 identity with an ASN.
 //!
 //! Product maps must come from **real** sources (PeeringDB / CAIDA / optional domain watchlists).
-//! See [`crate::peeringdb`] and `docs/REAL_DATA.md`.
+//! See [`crate::peeringdb`] and `docs/ORG_MAP.md`.
 
 mod peeringdb;
 

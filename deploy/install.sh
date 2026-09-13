@@ -52,6 +52,9 @@ if ! id -u "$USER_NAME" >/dev/null 2>&1; then
 fi
 if getent group state-capture >/dev/null 2>&1; then
   usermod -aG state-capture "$USER_NAME" || true
+  mkdir -p /var/lib/state-capture/announce
+  chgrp state-capture /var/lib/state-capture/announce || true
+  chmod 0775 /var/lib/state-capture/announce || true
 fi
 mkdir -p "$PREFIX"/{bin,scripts,fixtures,etc,docs} \
   "$STATE"/org-map \
@@ -63,6 +66,7 @@ install -m 0755 "$ROOT/scripts/run-daily-signals.sh" "$PREFIX/scripts/run-daily-
 install -m 0755 "$ROOT/scripts/run-refresh-org-map.sh" "$PREFIX/scripts/run-refresh-org-map.sh"
 install -m 0644 "$ROOT/fixtures/glue-asns.txt" "$PREFIX/fixtures/glue-asns.txt"
 install -m 0644 "$ROOT/docs/DAILY_OPS.md" "$PREFIX/docs/DAILY_OPS.md"
+install -m 0644 "$ROOT/docs/ORG_MAP.md" "$PREFIX/docs/ORG_MAP.md"
 ENV_DST="$PREFIX/etc/bgp-analyzer.env"
 if [[ ! -f "$ENV_DST" ]]; then
   install -m 0644 "$ROOT/deploy/bgp-analyzer.env.example" "$ENV_DST"
@@ -91,22 +95,18 @@ if command -v restorecon >/dev/null 2>&1; then
   restorecon -Rv "$PREFIX" "$STATE" || true
 fi
 
-# Seed org-map before enabling timers (Persistent=true can fire org-map immediately on Sundays).
-echo "== first org-map (blocking PeeringDB crawl) =="
-sudo -u "$USER_NAME" env \
-  BGP_ANALYZER_BIN="$PREFIX/bin/bgp-analyzer" \
-  BGP_GLUE="$PREFIX/fixtures/glue-asns.txt" \
-  BGP_DAILY_STATE="$STATE" \
-  BGP_ORG_MAP_DIR="$STATE/org-map" \
-  "$PREFIX/scripts/run-refresh-org-map.sh"
-
+# Seed via systemd oneshot (survives SSH drop; TimeoutStartSec=2h). Do not
+# block install on PeeringDB HTTP — a foreground crawl dies with the session.
 systemctl daemon-reload
 systemctl enable --now bgp-org-map.timer
 systemctl enable --now bgp-signals.timer
+echo "== seed org-map (systemd, non-blocking PeeringDB crawl) =="
+systemctl start --no-block bgp-org-map.service
 
 echo "installed:"
 echo "  prefix=$PREFIX state=$STATE"
 echo "  timers: bgp-org-map.timer (weekly), bgp-signals.timer (daily)"
+echo "  seed: systemctl status bgp-org-map.service"
 echo "  logs: journalctl -u bgp-signals.service -u bgp-org-map.service"
 echo "  review: $STATE/signals/inbox.jsonl"
 echo "  sqlite: $STATE/bgp-analyzer.sqlite"

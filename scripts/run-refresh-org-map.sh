@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Weekly PeeringDB org-map refresh: sqlite SoR + dated JSON copy + current symlink.
-# Daily signal jobs read live orgs from $BGP_DAILY_STATE/bgp-analyzer.sqlite (no crawl).
+# Org-map refresh: full PeeringDB HTTP crawl → sqlite SoR (change-aware commit) + dated JSON copy.
+# Attribution reference data, not the change stream. Daily signal jobs read live orgs from
+# $BGP_DAILY_STATE/bgp-analyzer.sqlite (no crawl). See docs/ORG_MAP.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

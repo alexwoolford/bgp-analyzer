@@ -21,14 +21,16 @@ Long historical backtests (monthly RIBs) are for **evaluation**, not the hot pat
 
 ## Org map (PeeringDB reference data)
 
-The ASN↔org↔domain map is **reference data**. PeeringDB changes over time; a full crawl is polite but not free.
+The ASN↔org↔domain map is **slowly changing reference data** for attribution, not the change stream. The product trickle is daily `network_contact` (RIB `T−1` vs `T`). See [ORG_MAP.md](ORG_MAP.md).
+
+PeeringDB HTTP is a **full** `/net` pagination every refresh (polite, not free). Sqlite/`_outbox` commit is change-aware: unchanged orgs emit no extra events. Weekly Sunday crawl is a conservative ops default (~2× the 14-day age gate), not a product requirement. Cadence knobs: `bgp-org-map.timer` and `ORG_MAP_MAX_AGE_DAYS`. Do not add incremental PeeringDB `?since=` unless the 2h oneshot is actually hurting.
 
 | Cadence | Job | Behavior |
 |---------|-----|----------|
-| **Weekly** | `./scripts/run-refresh-org-map.sh` | Crawl PeeringDB → work sqlite `orgs` / `org_map_runs`; dated JSON + `current` symlink is a local copy |
+| **Weekly** | `./scripts/run-refresh-org-map.sh` | Full PeeringDB crawl → work sqlite `orgs` / `org_map_runs`; dated JSON + `current` symlink is a local copy |
 | **Daily** | `./scripts/run-daily-signals.sh` | Load live orgs from sqlite; **refuse** if `org_map_runs.finished_at` is older than `ORG_MAP_MAX_AGE_DAYS` (default 14) |
 
-Daily does **not** crawl PeeringDB. Overlay (`BGP_ORG_MAP_OVERLAY`) is opt-in for local eval — do not set it in production.
+Daily does **not** crawl PeeringDB. Overlay (`BGP_ORG_MAP_OVERLAY`) is opt-in for local eval — do not set it in production. Downstream must join `orgs` for names/domains and must not treat org upserts as M&A events.
 
 ## Local review (eyeball a run)
 
@@ -165,7 +167,7 @@ First day after install only stores a snapshot; the next UTC day (or a second pi
 
 Work sqlite: `/var/lib/bgp-analyzer/bgp-analyzer.sqlite` (`db_name` `bgp-analyzer`). `capturable-state` v0.1.1 installs `_outbox` on `network_contact`, `orgs`, `signal_runs`, `org_map_runs`. JSONL under `signals/` is a post-commit review copy.
 
-systemd `ReadWritePaths` includes `-/var/lib/state-capture/announce` and `-/run/state`. `install.sh` adds `bgp` to group `state-capture` when that group exists. Env: `STATE_CAPTURE_SOCK`, `STATE_CAPTURE_ANNOUNCE_DIR`. Collector read access to `/var/lib/bgp-analyzer` is configured on the collector host, not in this crate. Contract: [CAPTURE.md](CAPTURE.md).
+systemd `ReadWritePaths` includes `/var/lib/state-capture/announce` (required; no `-` prefix) and `-/run/state`. `install.sh` adds `bgp` to group `state-capture` and makes the announce dir group-writable when that group exists. Seed crawl is `systemctl start --no-block bgp-org-map.service` (not a blocking SSH `install.sh` step). Env: `STATE_CAPTURE_SOCK`, `STATE_CAPTURE_ANNOUNCE_DIR`. Collector read access to `/var/lib/bgp-analyzer` is configured on the collector host, not in this crate. Contract: [CAPTURE.md](CAPTURE.md).
 
 ## Outputs (reviewable)
 
@@ -194,5 +196,6 @@ Under the state dir (`data/daily/` locally, `/var/lib/bgp-analyzer/` in producti
 - PeeringDB org map is crawl-time, not historical truth for past days
 - Same-org ASN consolidations and leasing ASNs are suppressed but residual noise remains
 - Frozen sparse default: do not raise thresholds from lead-lag nulls
+- Daily RouteViews RIB is the expensive recurring job (not captured). `--focus-from-org-map` currently keeps almost every non-glue PeeringDB ASN; tightening subjects beats incremental PeeringDB sync
 
-See [MA_SIGNAL.md](MA_SIGNAL.md) and [BACKTEST.md](BACKTEST.md).
+See [MA_SIGNAL.md](MA_SIGNAL.md), [ORG_MAP.md](ORG_MAP.md), and [BACKTEST.md](BACKTEST.md).
