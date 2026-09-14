@@ -5,19 +5,38 @@
 # Heuristic companion (see bgp_map::heuristics): mid-market watchlist ASNs
 # should also have modest announced prefix counts when known.
 
-# Hyperscalers / cloud
+# Hyperscalers / cloud (parent + common satellite ASNs).
+# Glue on either side of a pair is dropped; satellites must be listed or
+# same-family (shared registrable domain) will not always catch them.
 16509
 14618
+7224
+8987
+9059
 15169
 36040
 396982
+43515
+19527
+36492
+16591
+36039
+139190
 8075
+8068
+8069
+12076
 13335
+209242
 20940
 54113
 16625
+18717
+20189
 22822
 32590
+63293
+54115
 
 # Large content / CDN / DNS
 15133

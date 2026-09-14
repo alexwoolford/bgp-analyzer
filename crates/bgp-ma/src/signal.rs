@@ -10,7 +10,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::AsnPairFeature;
-use bgp_map::OrgMap;
+use bgp_map::{shares_family, GlueSet, OrgMap};
 
 mod utc_iso_serde {
     use chrono::{DateTime, NaiveDateTime, Utc};
@@ -103,26 +103,6 @@ fn pair_key(lo: u32, hi: u32) -> String {
 }
 
 impl PairStateStore {
-    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref();
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let text = fs::read_to_string(path)
-            .with_context(|| format!("reading pair state {}", path.display()))?;
-        Ok(serde_json::from_str(&text)?)
-    }
-
-    pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
-        let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let f = File::create(path)?;
-        serde_json::to_writer_pretty(BufWriter::new(f), self)?;
-        Ok(())
-    }
-
     pub fn merge_day(
         &mut self,
         features: &[AsnPairFeature],
@@ -177,7 +157,20 @@ impl PairStateStore {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanDropReason {
     SameOrg,
+    SameFamily,
     Leasing,
+    Glue,
+    Unattributed,
+}
+
+pub struct CleanContext<'a> {
+    pub leasing: &'a HashSet<u32>,
+    pub glue: &'a GlueSet,
+    pub org_map: &'a OrgMap,
+}
+
+fn org_present(id: Option<&str>) -> bool {
+    id.map(str::trim).is_some_and(|s| !s.is_empty())
 }
 
 pub fn leasing_set(extra: &[u32]) -> HashSet<u32> {
@@ -191,22 +184,43 @@ pub fn clean_drop_reason(
     hi: u32,
     org_lo: Option<&str>,
     org_hi: Option<&str>,
-    leasing: &HashSet<u32>,
+    ctx: &CleanContext<'_>,
 ) -> Option<CleanDropReason> {
-    if leasing.contains(&lo) || leasing.contains(&hi) {
+    if ctx.glue.contains(lo) || ctx.glue.contains(hi) {
+        return Some(CleanDropReason::Glue);
+    }
+    if ctx.leasing.contains(&lo) || ctx.leasing.contains(&hi) {
         return Some(CleanDropReason::Leasing);
     }
-    if let (Some(a), Some(b)) = (org_lo, org_hi) {
-        if !a.is_empty() && a == b {
-            return Some(CleanDropReason::SameOrg);
-        }
+    if !org_present(org_lo) || !org_present(org_hi) {
+        return Some(CleanDropReason::Unattributed);
+    }
+    if org_lo == org_hi {
+        return Some(CleanDropReason::SameOrg);
+    }
+    if ctx.org_map.same_family(lo, hi) {
+        return Some(CleanDropReason::SameFamily);
+    }
+    // Defense in depth if feature orgs were not joined to OrgMap records.
+    let domains_lo = ctx
+        .org_map
+        .org_for_asn(lo)
+        .map(|o| o.domains.as_slice())
+        .unwrap_or(&[]);
+    let domains_hi = ctx
+        .org_map
+        .org_for_asn(hi)
+        .map(|o| o.domains.as_slice())
+        .unwrap_or(&[]);
+    if shares_family(domains_lo, domains_hi) {
+        return Some(CleanDropReason::SameFamily);
     }
     None
 }
 
 pub fn filter_clean_features(
     features: &[AsnPairFeature],
-    leasing: &HashSet<u32>,
+    ctx: &CleanContext<'_>,
 ) -> (Vec<AsnPairFeature>, Vec<(AsnPairFeature, CleanDropReason)>) {
     let mut kept = Vec::new();
     let mut dropped = Vec::new();
@@ -216,7 +230,7 @@ pub fn filter_clean_features(
             f.asn_hi,
             f.org_lo.as_deref(),
             f.org_hi.as_deref(),
-            leasing,
+            ctx,
         ) {
             Some(r) => dropped.push((f.clone(), r)),
             None => kept.push(f.clone()),
@@ -342,18 +356,117 @@ mod tests {
     #[test]
     fn drops_same_org_and_leasing() {
         let leasing = leasing_set(&[]);
+        let glue = GlueSet::new();
+        let map = OrgMap::new();
+        let ctx = CleanContext {
+            leasing: &leasing,
+            glue: &glue,
+            org_map: &map,
+        };
         assert_eq!(
-            clean_drop_reason(1, 2, Some("org:a"), Some("org:a"), &leasing),
+            clean_drop_reason(1, 2, Some("org:a"), Some("org:a"), &ctx),
             Some(CleanDropReason::SameOrg)
         );
         assert_eq!(
-            clean_drop_reason(834, 100, Some("x"), Some("y"), &leasing),
+            clean_drop_reason(834, 100, Some("x"), Some("y"), &ctx),
             Some(CleanDropReason::Leasing)
         );
         assert_eq!(
-            clean_drop_reason(1, 2, Some("org:a"), Some("org:b"), &leasing),
+            clean_drop_reason(1, 2, Some("org:a"), Some("org:b"), &ctx),
             None
         );
+    }
+
+    #[test]
+    fn drops_unattributed_and_glue_and_family() {
+        let leasing = leasing_set(&[]);
+        let mut glue = GlueSet::new();
+        glue.insert(15169);
+        let mut map = OrgMap::new();
+        map.insert(bgp_map::OrgRecord {
+            org_id: "pdb:google-llc".into(),
+            name: "Google LLC".into(),
+            asns: vec![15169],
+            domains: vec!["google.com".into()],
+            prefix_count_hint: None,
+            external_id: None,
+        });
+        map.insert(bgp_map::OrgRecord {
+            org_id: "pdb:google-ie".into(),
+            name: "Google Ireland".into(),
+            asns: vec![43515],
+            domains: vec!["google.com".into()],
+            prefix_count_hint: None,
+            external_id: None,
+        });
+        map.insert(bgp_map::OrgRecord {
+            org_id: "pdb:acme".into(),
+            name: "Acme".into(),
+            asns: vec![65000],
+            domains: vec!["acme.example".into()],
+            prefix_count_hint: None,
+            external_id: None,
+        });
+        map.insert(bgp_map::OrgRecord {
+            org_id: "pdb:beta".into(),
+            name: "Beta".into(),
+            asns: vec![65001],
+            domains: vec!["beta.example".into()],
+            prefix_count_hint: None,
+            external_id: None,
+        });
+        let ctx = CleanContext {
+            leasing: &leasing,
+            glue: &glue,
+            org_map: &map,
+        };
+        assert_eq!(
+            clean_drop_reason(65000, 65001, None, Some("pdb:beta"), &ctx),
+            Some(CleanDropReason::Unattributed)
+        );
+        assert_eq!(
+            clean_drop_reason(65000, 65001, Some("pdb:acme"), None, &ctx),
+            Some(CleanDropReason::Unattributed)
+        );
+        assert_eq!(
+            clean_drop_reason(65000, 65001, Some(""), Some("pdb:beta"), &ctx),
+            Some(CleanDropReason::Unattributed)
+        );
+        assert_eq!(
+            clean_drop_reason(15169, 65000, Some("pdb:google-llc"), Some("pdb:acme"), &ctx),
+            Some(CleanDropReason::Glue)
+        );
+        assert_eq!(
+            clean_drop_reason(
+                15169,
+                43515,
+                Some("pdb:google-llc"),
+                Some("pdb:google-ie"),
+                &ctx
+            ),
+            Some(CleanDropReason::Glue)
+        );
+        let mut no_glue = GlueSet::new();
+        let ctx_family = CleanContext {
+            leasing: &leasing,
+            glue: &no_glue,
+            org_map: &map,
+        };
+        assert_eq!(
+            clean_drop_reason(
+                15169,
+                43515,
+                Some("pdb:google-llc"),
+                Some("pdb:google-ie"),
+                &ctx_family
+            ),
+            Some(CleanDropReason::SameFamily)
+        );
+        assert_eq!(
+            clean_drop_reason(65000, 65001, Some("pdb:acme"), Some("pdb:beta"), &ctx),
+            None
+        );
+        let _ = &mut no_glue;
     }
 
     #[test]

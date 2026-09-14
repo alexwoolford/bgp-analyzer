@@ -3,6 +3,8 @@ Description=BGP network-contact daily signals
 Documentation=file:///opt/bgp-analyzer/docs/DAILY_OPS.md
 After=network-online.target
 Wants=network-online.target
+# Daily must not wait on the weekly org-map unit. Install enables this timer
+# without --now; run-daily-signals.sh exits 0 until org_map_runs exists.
 
 [Service]
 Type=oneshot

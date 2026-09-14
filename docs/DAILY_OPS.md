@@ -2,7 +2,7 @@
 
 ## Product
 
-This repo emits **BGP network-contact signals**: attributable contact between non-glue organizations’ networks (prefix moves, new adjacency, upstream convergence, footprint steps), with ASN / org / domain attributes.
+This repo emits **BGP network-contact signals**: attributable contact between non-glue organizations’ networks. The daily default is **`prefix_move` with ≥2 prefixes** on the same ASN pair. New adjacency, upstream convergence, and footprint steps are diff/`--full`/backtest only — not the production sqlite emit.
 
 `score` is a **triage heuristic**, not a calibrated deal probability. Offline lead-lag work found low precision when treating high scores as M&A leads — do not rank “BGP first” for deal discovery. See [LEAD_LAG_VERDICT.md](LEAD_LAG_VERDICT.md).
 
@@ -13,7 +13,7 @@ Quiet production is a **rolling day pair**:
 1. Fetch (or reuse) today’s RouteViews RIB → origin-collapsed snapshot
 2. Diff vs the prior retained snapshot (`T−1` vs `T`)
 3. Sparse-filter (`prefix_move` with ≥2 prefixes per ASN pair by default)
-4. Drop same-org multi-ASN and leasing/marketplace ASNs
+4. Drop glue (either side), leasing, unattributed (missing org id), same PeeringDB org, and same-family (shared registrable domain) pairs
 5. Update 30-day rolling pair state (persistence)
 6. Emit versioned signals (`kind=network_contact`)
 
@@ -50,8 +50,9 @@ BGP_DAILY_STATE=data/daily-review ./scripts/run-refresh-org-map.sh
 
 Review:
 
-- `data/daily-review/signals/inbox.jsonl` — append-only feed (preferred)
-- `data/daily-review/signals/signals-YYYY-MM-DD.jsonl` — that day’s emit
+- `data/daily-review/bgp-analyzer.sqlite` — system of record (`network_contact`)
+- `data/daily-review/signals/signals-YYYY-MM-DD.jsonl` — that day’s review copy (after commit)
+- `data/daily-review/signals/inbox.jsonl` — append-only; **not** idempotent on same-day rerun
 
 Day 1 only stores a snapshot; day 2 diffs and writes signals. Expect real RIB downloads (minutes).
 
@@ -65,9 +66,9 @@ cargo build -p bgp-analyzer-cli --release
 ./scripts/run-daily-signals.sh     # next UTC day emits signals
 ```
 
-Env overrides: `BGP_ANALYZER_BIN`, `BGP_DAILY_STATE`, `BGP_ORG_MAP` / `BGP_ORG_MAP_DIR`, `BGP_GLUE`, `BGP_ORG_MAP_OVERLAY` (opt-in), `BGP_COLLECTOR`, `ORG_MAP_MAX_AGE_DAYS`.
+Env overrides: `BGP_ANALYZER_BIN`, `BGP_DAILY_STATE`, `BGP_ORG_MAP_DIR` (dated JSON copy from refresh), `BGP_GLUE`, `BGP_ORG_MAP_OVERLAY` (opt-in), `BGP_COLLECTOR`, `ORG_MAP_MAX_AGE_DAYS`. Daily loads orgs from sqlite, not `BGP_ORG_MAP`.
 
-Default enables `--focus-from-org-map` so snapshots keep subject ASNs (affordable quiet runs).
+Default enables `--focus-from-org-map`: subject ASNs after applying **RIB origin prefix counts** to `SubjectHeuristics`, then keep prefixes whose **origin** is in that set. Pass `--debug-jsonl` to write intermediate `events/` files.
 
 ## Deploy (systemd, recommended)
 
@@ -131,12 +132,12 @@ Upgrades: `git pull` (or new tag) → re-run `sudo ./deploy/install.sh` (env fil
 ### Collecting signals (after install)
 
 ```bash
-# Append-only review feed (each JSON line is one network-contact signal)
-sudo -u bgp less /var/lib/bgp-analyzer/signals/inbox.jsonl
-
 # Work sqlite (system of record)
 sudo -u bgp sqlite3 /var/lib/bgp-analyzer/bgp-analyzer.sqlite \
   "SELECT COUNT(*) FROM network_contact WHERE deleted_at IS NULL;"
+
+# Append-only review feed (lossy; same-day reruns duplicate lines)
+sudo -u bgp less /var/lib/bgp-analyzer/signals/inbox.jsonl
 
 # One UTC calendar day
 sudo -u bgp less /var/lib/bgp-analyzer/signals/signals-YYYY-MM-DD.jsonl
@@ -149,7 +150,7 @@ Each record includes UTC observation times `as_of` (later RIB day) and `prior_as
 ```bash
 systemctl list-timers 'bgp-*'
 journalctl -u bgp-signals.service -u bgp-org-map.service -n 50 --no-pager
-du -sh /var/lib/bgp-analyzer   # focused snapshots; pruned via --retain-days
+du -sh /var/lib/bgp-analyzer   # origin-focused snapshots; pruned via --retain-days
 ```
 
 Manual oneshots:
@@ -177,10 +178,9 @@ Under the state dir (`data/daily/` locally, `/var/lib/bgp-analyzer/` in producti
 |------|---------|
 | `bgp-analyzer.sqlite` | Work sqlite: signals, orgs, run tables, `_outbox`; uncaptured `pair_state` |
 | `snapshots/rib-YYYY-MM-DD.json` | Rolling RIB origin snapshots (hose; not captured) |
-| `events/events-YYYY-MM-DD.jsonl` | Sparse day events (intermediate) |
-| `events/pair-features-YYYY-MM-DD.cleaned.jsonl` | Cleaned pairs for the day |
+| `events/*.jsonl` | Intermediate hose; written only with `--debug-jsonl` |
 | `signals/signals-YYYY-MM-DD.jsonl` | Signal envelope (lossy review copy after commit) |
-| `signals/inbox.jsonl` | Append-only human review feed |
+| `signals/inbox.jsonl` | Append-only human review feed (not idempotent) |
 
 ### Signal envelope (`schema_version: 1`)
 
@@ -194,8 +194,9 @@ Under the state dir (`data/daily/` locally, `/var/lib/bgp-analyzer/` in producti
 
 - Only ASN-visible companies; most M&A has no public ASN pair
 - PeeringDB org map is crawl-time, not historical truth for past days
-- Same-org ASN consolidations and leasing ASNs are suppressed but residual noise remains
+- Glue, leasing, missing org ids, same PeeringDB org, and shared-domain families are suppressed; PeeringDB org ≠ ultimate parent, so residual intra-group noise can remain
 - Frozen sparse default: do not raise thresholds from lead-lag nulls
-- Daily RouteViews RIB is the expensive recurring job (not captured). `--focus-from-org-map` currently keeps almost every non-glue PeeringDB ASN; tightening subjects beats incremental PeeringDB sync
+- Daily RouteViews RIB is the expensive recurring job (not captured). `--focus-from-org-map` applies RIB prefix counts and origin-only retain; first install skips signals until `org_map_runs` exists
+- Install enables the signals **timer** without `--now` so a Persistent catch-up cannot race the seed crawl. `run-daily-signals.sh` exits 0 if the org map is not seeded yet.
 
 See [MA_SIGNAL.md](MA_SIGNAL.md), [ORG_MAP.md](ORG_MAP.md), and [BACKTEST.md](BACKTEST.md).

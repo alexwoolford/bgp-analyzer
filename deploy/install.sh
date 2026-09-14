@@ -99,13 +99,15 @@ fi
 # block install on PeeringDB HTTP — a foreground crawl dies with the session.
 systemctl daemon-reload
 systemctl enable --now bgp-org-map.timer
-systemctl enable --now bgp-signals.timer
+# Do not --now the signals timer: Persistent=true would catch up before the
+# seed crawl finishes. The next 02:30 UTC fire (or a manual start) is correct.
+systemctl enable bgp-signals.timer
 echo "== seed org-map (systemd, non-blocking PeeringDB crawl) =="
 systemctl start --no-block bgp-org-map.service
 
 echo "installed:"
 echo "  prefix=$PREFIX state=$STATE"
-echo "  timers: bgp-org-map.timer (weekly), bgp-signals.timer (daily)"
+echo "  timers: bgp-org-map.timer (weekly, enabled now), bgp-signals.timer (daily, next 02:30 UTC)"
 echo "  seed: systemctl status bgp-org-map.service"
 echo "  logs: journalctl -u bgp-signals.service -u bgp-org-map.service"
 echo "  review: $STATE/signals/inbox.jsonl"

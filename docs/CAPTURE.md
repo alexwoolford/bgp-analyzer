@@ -15,13 +15,14 @@ Pin: `capturable-state` git tag `v0.1.1` (not a path dep; do not copy `src/*.rs`
 | `org_map_runs` | **yes** | after | Domain telemetry: did the PeeringDB crawl finish? |
 | `orgs` (ASN / org / domain spine) | **yes** | after | Join names/domains without re-crawling. **Not** an M&A event stream |
 | `pair_state` | **no** | — | Derived (P8). Hard-prunes old pairs. Persistence counts live on the signal row |
+| `schema_migrations` | **no** | — | Local DDL versioning |
 | RIB snapshots | **no** | — | Hose. Never attach triggers. Never `--snapshot` to “refresh” them |
 | Sparse events / pair-features JSONL | **no** | — | Intermediate |
 | `signals/signals-YYYY-MM-DD.jsonl` / `inbox.jsonl` | **no** | — | Local review copy written **after** commit |
 | Cyber `alerts.jsonl` | **no** | — | Not the product |
 | In-memory RIB / MRT `f64` timestamps | **no** | — | Ingest-boundary only |
 
-`score` is a triage heuristic, not a deal probability ([LEAD_LAG_VERDICT.md](LEAD_LAG_VERDICT.md)). It is stored as an integer fact so warehouse consumers do not recompute it.
+`score` is a triage heuristic, not a deal probability ([LEAD_LAG_VERDICT.md](LEAD_LAG_VERDICT.md)). It is stored as an integer fact so downstream consumers do not recompute it.
 
 Do not `collect --snapshot` this database to “refresh” RIB-sized files. Incremental `_outbox` drain of the trickle is the steady state.
 
@@ -54,6 +55,7 @@ systemd oneshots write announce + nudge:
 - `TimeoutStartSec=2h`
 - Env: `STATE_CAPTURE_SOCK=/run/state/collect.sock`, `STATE_CAPTURE_ANNOUNCE_DIR=/var/lib/state-capture/announce`
 - `install.sh` adds `bgp` to group `state-capture` when that group exists (socket is `0660`)
+- `install.sh` enables `bgp-signals.timer` **without** `--now` so a Persistent catch-up cannot race the seed crawl
 
 Collector read access to `/var/lib/bgp-analyzer` is configured on the collector host, not in this crate. Do not watch a published copy.
 

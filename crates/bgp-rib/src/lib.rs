@@ -7,7 +7,16 @@ use ipnet::IpNet;
 use ipnet_trie::IpnetTrie;
 use serde::{Deserialize, Serialize};
 
-pub use bgp_rpki::RpkiState;
+/// ROV mark stored on a RIB entry. Defined here so the product RIB path does not
+/// depend on `bgp-rpki`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum RpkiState {
+    Valid,
+    Invalid,
+    #[default]
+    Unknown,
+}
 
 /// Interned identifier for a deduplicated attribute (AS_PATH or communities).
 pub type AttrId = u32;

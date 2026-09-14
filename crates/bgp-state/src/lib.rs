@@ -3,11 +3,12 @@
 //! Captured: `network_contact`, `orgs`, `signal_runs`, `org_map_runs`.
 //! Uncaptured: `pair_state`. RIB snapshots stay files.
 
+mod migrate;
 mod schema;
 mod store;
 mod time;
 
-pub use schema::{CAPTURED_TABLES, SCHEMA_SQL};
+pub use schema::{CAPTURED_TABLES, SCHEMA_BASELINE_VERSION, SCHEMA_SQL};
 pub use store::{
     join_asns, join_csv, work_db_path, OrgMapCommit, SignalRun, SignalRunStatus, WorkDb, DB_NAME,
     SQLITE_FILENAME,

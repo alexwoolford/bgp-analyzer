@@ -2,7 +2,7 @@
 
 **BGP network-contact signals** for M&A diligence: who touched whose network on the public internet.
 
-Each day the tool diffs consecutive RouteViews RIB snapshots, attributes ASNs to organizations via PeeringDB, and emits sparse events—prefix moves, new adjacency, upstream convergence, footprint steps—with **ASN / org / domain** on each row.
+Each day the tool diffs consecutive RouteViews RIB snapshots, attributes ASNs to organizations via PeeringDB, and emits a sparse **attributable** contact feed. The daily default is **multi-prefix `prefix_move` (≥2 prefixes** on the same ASN pair that day), with **ASN / org / domain** on each row. New adjacency, upstream convergence, and footprint steps are computed for debug/`--full`/backtest; they are **not** the production emit.
 
 Useful as an **independent contact feed**. It is **not** a ranked deal list: offline evaluation found the signal weak alone for M&A prediction, and `score` is a triage heuristic (not a deal probability).
 

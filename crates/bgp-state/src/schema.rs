@@ -70,6 +70,14 @@ CREATE TABLE IF NOT EXISTS pair_state (
   PRIMARY KEY (asn_lo, asn_hi),
   CHECK (asn_lo < asn_hi)
 ) STRICT;
+
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY NOT NULL,
+  applied_at TEXT NOT NULL
+) STRICT;
 "#;
+
+/// Baseline version matching [`SCHEMA_SQL`]. New DDL must land as a numbered migration.
+pub const SCHEMA_BASELINE_VERSION: i64 = 1;
 
 pub const CAPTURED_TABLES: &[&str] = &["network_contact", "orgs", "signal_runs", "org_map_runs"];

@@ -140,13 +140,14 @@ impl GlueSet {
         Ok(set)
     }
 
-    /// Built-in starter list (hyperscalers + selected Tier-1 / CDN). Prefer
+    /// Built-in starter list (hyperscalers + satellites + selected Tier-1 / CDN). Prefer
     /// [`from_file`] with [`fixtures/glue-asns.txt`](../../fixtures/glue-asns.txt) in prod.
     pub fn builtin() -> Self {
         const BUILTIN: &[u32] = &[
-            16509, 14618, 15169, 36040, 396982, 8075, 13335, 20940, 54113, 16625, 174, 209, 286,
-            701, 1239, 1299, 2914, 3257, 3320, 3356, 3491, 6453, 6461, 6762, 6830, 7018, 3561,
-            7922, 714, 32934, 13414, 2906,
+            16509, 14618, 7224, 8987, 9059, 15169, 36040, 396982, 43515, 19527, 36492, 16591,
+            36039, 139190, 8075, 8068, 8069, 12076, 13335, 209242, 20940, 54113, 16625, 18717,
+            20189, 174, 209, 286, 701, 1239, 1299, 2914, 3257, 3320, 3356, 3491, 6453, 6461, 6762,
+            6830, 7018, 3561, 7922, 714, 32934, 63293, 54115, 13414, 2906,
         ];
         let mut set = GlueSet::new();
         for &asn in BUILTIN {
@@ -257,18 +258,40 @@ impl OrgMap {
             .unwrap_or_default()
     }
 
-    /// Watchlist ASNs that pass subject heuristics given glue + optional prefix hints.
-    pub fn subject_asns(&self, glue: &GlueSet, heuristics: &SubjectHeuristics) -> HashSet<u32> {
+    /// Watchlist ASNs that pass subject heuristics given glue + optional prefix counts.
+    ///
+    /// When `prefix_counts` is `Some`, per-ASN RIB origin counts overlay
+    /// `OrgRecord::prefix_count_hint`. Missing keys fall back to the org hint (so
+    /// path-only ASNs stay eligible for adjacency). Crawl-time callers pass `None`.
+    pub fn subject_asns(
+        &self,
+        glue: &GlueSet,
+        heuristics: &SubjectHeuristics,
+        prefix_counts: Option<&HashMap<u32, u32>>,
+    ) -> HashSet<u32> {
         let mut out = HashSet::new();
         for org in self.orgs.values() {
             let hint = org.prefix_count_hint;
             for &asn in &org.asns {
-                if heuristics.is_subject(asn, glue, hint) {
+                let count = prefix_counts.and_then(|m| m.get(&asn).copied()).or(hint);
+                if heuristics.is_subject(asn, glue, count) {
                     out.insert(asn);
                 }
             }
         }
         out
+    }
+
+    /// True when both ASNs map to orgs that share a registrable domain.
+    /// PeeringDB `org_id` is not a corporate parent; this is the lightweight family key.
+    pub fn same_family(&self, asn_lo: u32, asn_hi: u32) -> bool {
+        let Some(a) = self.org_for_asn(asn_lo) else {
+            return false;
+        };
+        let Some(b) = self.org_for_asn(asn_hi) else {
+            return false;
+        };
+        shares_family(&a.domains, &b.domains)
     }
 
     /// Load from JSON: `{ "orgs": [ OrgRecord, ... ] }` or a bare array of OrgRecord.
@@ -376,6 +399,41 @@ pub(crate) fn normalize_domain(raw: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Naive eTLD+1: last two labels, or three when the second-level is `co`/`com`/… + a ccTLD.
+pub fn registrable_domain(host: &str) -> String {
+    let h = normalize_domain(host);
+    let h = h.strip_prefix("www.").unwrap_or(h.as_str());
+    if h.is_empty() {
+        return String::new();
+    }
+    let parts: Vec<&str> = h.split('.').filter(|p| !p.is_empty()).collect();
+    if parts.len() <= 2 {
+        return h.to_string();
+    }
+    const SECOND_LEVEL: &[&str] = &["co", "com", "org", "net", "gov", "ac", "edu"];
+    let last = parts[parts.len() - 1];
+    let second = parts[parts.len() - 2];
+    if last.len() == 2 && SECOND_LEVEL.contains(&second) {
+        return parts[parts.len() - 3..].join(".");
+    }
+    parts[parts.len() - 2..].join(".")
+}
+
+/// True if the two domain lists share a registrable domain.
+pub fn shares_family(domains_a: &[String], domains_b: &[String]) -> bool {
+    let keys_a: HashSet<String> = domains_a
+        .iter()
+        .map(|d| registrable_domain(d))
+        .filter(|d| !d.is_empty())
+        .collect();
+    if keys_a.is_empty() {
+        return false;
+    }
+    domains_b
+        .iter()
+        .any(|d| keys_a.contains(&registrable_domain(d)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,9 +472,29 @@ mod tests {
         assert_eq!(map.org_for_asn(65000).unwrap().org_id, "acme");
         assert_eq!(map.orgs_for_domain("acme.com").len(), 1);
         let glue = GlueSet::builtin();
-        let subjects = map.subject_asns(&glue, &SubjectHeuristics::default());
+        let subjects = map.subject_asns(&glue, &SubjectHeuristics::default(), None);
         assert!(subjects.contains(&65000));
         assert!(subjects.contains(&65002));
+        let mut counts = HashMap::new();
+        counts.insert(65000, 50_000);
+        counts.insert(65002, 3);
+        let trimmed = map.subject_asns(&glue, &SubjectHeuristics::default(), Some(&counts));
+        assert!(!trimmed.contains(&65000));
+        assert!(trimmed.contains(&65002));
+    }
+
+    #[test]
+    fn registrable_domain_and_family() {
+        assert_eq!(registrable_domain("www.google.com"), "google.com");
+        assert_eq!(registrable_domain("maps.google.co.uk"), "google.co.uk");
+        assert!(shares_family(
+            &["www.google.com".into()],
+            &["ads.google.com".into()]
+        ));
+        assert!(!shares_family(
+            &["google.com".into()],
+            &["microsoft.com".into()]
+        ));
     }
 
     #[test]

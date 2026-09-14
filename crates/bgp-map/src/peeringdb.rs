@@ -15,8 +15,6 @@ use tracing::{info, warn};
 
 use crate::{normalize_domain, GlueSet, OrgMap, OrgRecord, SubjectHeuristics};
 
-const PEERINGDB_NET: &str = "https://www.peeringdb.com/api/net";
-const PEERINGDB_ORG: &str = "https://www.peeringdb.com/api/org";
 const PAGE: usize = 250;
 /// Anonymous PeeringDB cap is 20 req/min (≥3s). Docs also ask for ≥2s between queries.
 /// https://docs.peeringdb.com/howto/work_within_peeringdbs_query_limits/
@@ -25,10 +23,13 @@ const MAX_RETRIES: u32 = 12;
 
 static LAST_HTTP: Mutex<Option<Instant>> = Mutex::new(None);
 
-fn wait_rate_limit() {
+fn wait_rate_limit(min_interval: Duration) {
+    if min_interval.is_zero() {
+        return;
+    }
     let wait = match LAST_HTTP.lock() {
         Ok(guard) => (*guard)
-            .map(|prev| MIN_INTERVAL.saturating_sub(prev.elapsed()))
+            .map(|prev| min_interval.saturating_sub(prev.elapsed()))
             .unwrap_or(Duration::ZERO),
         Err(_) => Duration::ZERO,
     };
@@ -65,9 +66,13 @@ struct PdbOrg {
 #[derive(Debug, Clone)]
 pub struct PeeringDbBuildOptions {
     pub heuristics: SubjectHeuristics,
-    /// Max API pages of `/net` to fetch (each page = [`PAGE`] records). `None` = all.
+    /// Max API pages of `/net` to fetch (each page = [`page_size`] records). `None` = all.
     pub max_net_pages: Option<usize>,
     pub user_agent: String,
+    /// API root, no trailing slash. Tests inject a mock server.
+    pub api_base: String,
+    pub page_size: usize,
+    pub min_interval: Duration,
 }
 
 impl Default for PeeringDbBuildOptions {
@@ -76,6 +81,9 @@ impl Default for PeeringDbBuildOptions {
             heuristics: SubjectHeuristics::default(),
             max_net_pages: None,
             user_agent: "bgp-analyzer/0.1 (research; real-data org-map builder)".into(),
+            api_base: "https://www.peeringdb.com/api".into(),
+            page_size: PAGE,
+            min_interval: MIN_INTERVAL,
         }
     }
 }
@@ -100,7 +108,7 @@ pub fn build_org_map_from_peeringdb(
     let mut org_ids: Vec<u64> = nets.iter().map(|n| n.org_id).collect();
     org_ids.sort_unstable();
     org_ids.dedup();
-    let orgs = fetch_orgs_by_ids(&client, &org_ids)?;
+    let orgs = fetch_orgs_by_ids(&client, &org_ids, opts)?;
     info!(orgs = orgs.len(), "fetched PeeringDB orgs");
 
     let org_meta: HashMap<u64, &PdbOrg> = orgs.iter().map(|o| (o.id, o)).collect();
@@ -186,23 +194,27 @@ fn fetch_all_nets(
         if opts.max_net_pages.is_some_and(|m| pages >= m) {
             break;
         }
-        let url = format!("{PEERINGDB_NET}?limit={PAGE}&skip={skip}");
-        let resp: PdbList<PdbNet> = get_json(client, &url)?;
+        let url = format!("{}/net?limit={}&skip={skip}", opts.api_base, opts.page_size);
+        let resp: PdbList<PdbNet> = get_json(client, &url, opts.min_interval)?;
         let n = resp.data.len();
         out.extend(resp.data);
         pages += 1;
         if pages % 20 == 0 {
             info!(pages, nets = out.len(), skip, "PeeringDB /net progress");
         }
-        if n < PAGE {
+        if n < opts.page_size {
             break;
         }
-        skip += PAGE;
+        skip += opts.page_size;
     }
     Ok(out)
 }
 
-fn fetch_orgs_by_ids(client: &reqwest::blocking::Client, ids: &[u64]) -> Result<Vec<PdbOrg>> {
+fn fetch_orgs_by_ids(
+    client: &reqwest::blocking::Client,
+    ids: &[u64],
+    opts: &PeeringDbBuildOptions,
+) -> Result<Vec<PdbOrg>> {
     let mut out = Vec::new();
     for (i, chunk) in ids.chunks(100).enumerate() {
         let id_list = chunk
@@ -210,8 +222,8 @@ fn fetch_orgs_by_ids(client: &reqwest::blocking::Client, ids: &[u64]) -> Result<
             .map(|id| id.to_string())
             .collect::<Vec<_>>()
             .join(",");
-        let url = format!("{PEERINGDB_ORG}?id__in={id_list}&limit=100");
-        let resp: PdbList<PdbOrg> = get_json(client, &url)?;
+        let url = format!("{}/org?id__in={id_list}&limit=100", opts.api_base);
+        let resp: PdbList<PdbOrg> = get_json(client, &url, opts.min_interval)?;
         out.extend(resp.data);
         if (i + 1) % 20 == 0 {
             info!(chunks = i + 1, orgs = out.len(), "PeeringDB /org progress");
@@ -223,11 +235,12 @@ fn fetch_orgs_by_ids(client: &reqwest::blocking::Client, ids: &[u64]) -> Result<
 fn get_json<T: for<'de> Deserialize<'de>>(
     client: &reqwest::blocking::Client,
     url: &str,
+    min_interval: Duration,
 ) -> Result<T> {
     let mut attempt = 0u32;
     loop {
         attempt += 1;
-        wait_rate_limit();
+        wait_rate_limit(min_interval);
         let response = client
             .get(url)
             .send()
@@ -324,5 +337,99 @@ mod tests {
     fn anonymous_interval_respects_20_per_minute() {
         assert!(MIN_INTERVAL >= Duration::from_millis(3000));
         assert!(MIN_INTERVAL >= Duration::from_secs(2));
+    }
+
+    fn mock_opts(base: &str) -> PeeringDbBuildOptions {
+        PeeringDbBuildOptions {
+            api_base: base.to_string(),
+            page_size: 2,
+            min_interval: Duration::ZERO,
+            max_net_pages: None,
+            ..PeeringDbBuildOptions::default()
+        }
+    }
+
+    #[test]
+    fn mock_pagination_glue_skip_and_429_retry() {
+        let server = httpmock::MockServer::start();
+        let nets_page1 = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/net")
+                .query_param("skip", "0");
+            then.status(200).json_body(serde_json::json!({
+                "data": [
+                    {"org_id": 1, "asn": 65000, "website": "https://acme.example"},
+                    {"org_id": 2, "asn": 15169, "website": "https://google.com"}
+                ]
+            }));
+        });
+        let nets_page2 = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/net")
+                .query_param("skip", "2");
+            then.status(200).json_body(serde_json::json!({
+                "data": [
+                    {"org_id": 3, "asn": 65001, "website": "https://beta.example"}
+                ]
+            }));
+        });
+        let orgs = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/org");
+            then.status(200).json_body(serde_json::json!({
+                "data": [
+                    {"id": 1, "name": "Acme", "website": "https://acme.example"},
+                    {"id": 2, "name": "Google", "website": "https://google.com"},
+                    {"id": 3, "name": "Beta", "website": "https://beta.example"}
+                ]
+            }));
+        });
+
+        let glue = GlueSet::from_text("15169\n").unwrap();
+        let opts = mock_opts(&server.base_url());
+        let map = build_org_map_from_peeringdb(&glue, &opts).unwrap();
+        assert!(map.org_for_asn(65000).is_some());
+        assert!(map.org_for_asn(65001).is_some());
+        assert!(
+            map.org_for_asn(15169).is_none(),
+            "glue ASN must not be a subject"
+        );
+        nets_page1.assert();
+        nets_page2.assert();
+        orgs.assert();
+    }
+
+    #[test]
+    fn mock_429_then_success() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        static ORG_HITS: AtomicUsize = AtomicUsize::new(0);
+        ORG_HITS.store(0, Ordering::SeqCst);
+
+        let server = httpmock::MockServer::start();
+        let org_fail = server.mock(|when, then| {
+            when.method(httpmock::Method::GET)
+                .path("/org")
+                .matches(|_req| ORG_HITS.fetch_add(1, Ordering::SeqCst) == 0);
+            then.status(429).header("retry-after", "0").body("slow");
+        });
+        let org_ok = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/org");
+            then.status(200).json_body(serde_json::json!({
+                "data": [{"id": 1, "name": "Acme", "website": "https://acme.example"}]
+            }));
+        });
+        let net_ok = server.mock(|when, then| {
+            when.method(httpmock::Method::GET).path("/net");
+            then.status(200).json_body(serde_json::json!({
+                "data": [{"org_id": 1, "asn": 65000, "website": "https://acme.example"}]
+            }));
+        });
+
+        let glue = GlueSet::new();
+        let map = build_org_map_from_peeringdb(&glue, &mock_opts(&server.base_url())).unwrap();
+        assert!(map.org_for_asn(65000).is_some());
+        net_ok.assert();
+        org_fail.assert();
+        org_ok.assert();
     }
 }

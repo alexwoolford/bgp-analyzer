@@ -30,6 +30,18 @@ test -f "$GLUE" || {
 
 mkdir -p "$STATE"
 
+if [[ ! -f "$STATE/bgp-analyzer.sqlite" ]]; then
+  echo "org map not seeded yet (missing $STATE/bgp-analyzer.sqlite); skip daily" >&2
+  exit 0
+fi
+if command -v sqlite3 >/dev/null 2>&1; then
+  runs="$(sqlite3 "$STATE/bgp-analyzer.sqlite" "SELECT COUNT(*) FROM org_map_runs;" 2>/dev/null || echo 0)"
+  if [[ "${runs:-0}" -eq 0 ]]; then
+    echo "org map not seeded yet (no org_map_runs); start bgp-org-map.service first" >&2
+    exit 0
+  fi
+fi
+
 acquire_lock() {
   if command -v flock >/dev/null 2>&1; then
     exec 9>"$LOCK"

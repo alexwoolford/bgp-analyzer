@@ -198,18 +198,21 @@ pub struct DailyArgs {
     pub footprint_rel_threshold: f64,
     #[arg(long, default_value_t = 5)]
     pub footprint_abs_threshold: u32,
-    /// Comma-separated ASNs to retain in snapshots (origins/paths).
+    /// Comma-separated ASNs to retain in snapshots (origins).
     #[arg(long)]
     pub focus_asns: Option<String>,
-    /// Focus snapshots on subject ASNs from the org map (SubjectHeuristics).
+    /// Focus snapshots on subject ASNs from the org map using RIB origin prefix counts.
     #[arg(long, default_value_t = false)]
     pub focus_from_org_map: bool,
-    /// Skip same-org / leasing clean before signal emit.
+    /// Skip same-org / glue / leasing / unattributed / family clean before signal emit.
     #[arg(long, default_value_t = false)]
     pub no_clean: bool,
     /// Do not append to signals/inbox.jsonl.
     #[arg(long, default_value_t = false)]
     pub no_inbox: bool,
+    /// Write intermediate events/ and pair-features JSONL (debug hose).
+    #[arg(long, default_value_t = false)]
+    pub debug_jsonl: bool,
 }
 
 #[derive(Debug, Parser)]

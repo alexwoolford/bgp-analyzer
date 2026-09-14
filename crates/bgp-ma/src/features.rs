@@ -160,7 +160,7 @@ pub fn aggregate_pair_features(events: &[MaEvent]) -> Vec<AsnPairFeature> {
     out
 }
 
-/// Daily / investor sparse filter: keep high-signal events only.
+/// Daily sparse filter: keep high-signal events only.
 #[derive(Debug, Clone)]
 pub struct SparseConfig {
     /// Keep `prefix_move` when the same ASN pair moves at least this many prefixes that day.

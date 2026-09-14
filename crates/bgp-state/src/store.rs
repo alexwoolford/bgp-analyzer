@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use tracing::info;
 
+use crate::migrate::apply_migrations;
 use crate::schema::SCHEMA_SQL;
 use crate::time::{parse_utc_iso, utc_date, utc_iso};
 
@@ -102,6 +103,7 @@ impl WorkDb {
         apply_runtime_pragmas(&conn)?;
         conn.execute_batch(SCHEMA_SQL)
             .context("create work tables")?;
+        apply_migrations(&conn).context("schema migrations")?;
         let tables = capture_tables();
         let nudge = if is_memory_path(path) {
             Nudge::new(DB_NAME, Some(Path::new("/dev/null")))
@@ -809,5 +811,49 @@ pub(crate) mod tests {
             CAPTURED_TABLES,
             &["network_contact", "orgs", "signal_runs", "org_map_runs"]
         );
+    }
+
+    #[test]
+    fn require_fresh_org_map_missing_stale_empty() {
+        let (_dir, mut db) = test_db();
+        let now = Utc.with_ymd_and_hms(2026, 9, 13, 12, 0, 0).unwrap();
+        let err = db.require_fresh_org_map(now, 14).unwrap_err().to_string();
+        assert!(err.contains("no org_map_runs"), "{err}");
+
+        let mut map = OrgMap::new();
+        map.insert(sample_org("pdb:1", 1));
+        let old = Utc.with_ymd_and_hms(2026, 8, 1, 12, 0, 0).unwrap();
+        db.commit_org_map(&map, old).unwrap();
+        db.conn_mut()
+            .execute(
+                "UPDATE org_map_runs SET finished_at = '2026-08-01T12:00:00Z'",
+                [],
+            )
+            .unwrap();
+        let err = db.require_fresh_org_map(now, 14).unwrap_err().to_string();
+        assert!(err.contains("too old"), "{err}");
+
+        db.conn_mut()
+            .execute(
+                "UPDATE org_map_runs SET finished_at = '2026-09-13T00:00:00Z'",
+                [],
+            )
+            .unwrap();
+        db.conn_mut()
+            .execute("UPDATE orgs SET deleted_at = 1", [])
+            .unwrap();
+        let err = db.require_fresh_org_map(now, 14).unwrap_err().to_string();
+        assert!(err.contains("no live orgs"), "{err}");
+    }
+
+    #[test]
+    fn require_fresh_org_map_ok() {
+        let (_dir, mut db) = test_db();
+        let now = Utc.with_ymd_and_hms(2026, 9, 13, 12, 0, 0).unwrap();
+        let mut map = OrgMap::new();
+        map.insert(sample_org("pdb:1", 1));
+        db.commit_org_map(&map, now).unwrap();
+        let loaded = db.require_fresh_org_map(now, 14).unwrap();
+        assert_eq!(loaded.len(), 1);
     }
 }

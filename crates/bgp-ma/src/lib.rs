@@ -10,8 +10,8 @@ pub use features::{
 };
 pub use signal::{
     append_inbox_jsonl, build_signals, clean_drop_reason, filter_clean_features, leasing_set,
-    write_signals_jsonl, CleanDropReason, PairStateEntry, PairStateStore, SignalEnvelope,
-    DEFAULT_LEASING_ASNS,
+    write_signals_jsonl, CleanContext, CleanDropReason, PairStateEntry, PairStateStore,
+    SignalEnvelope, DEFAULT_LEASING_ASNS,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -148,9 +148,19 @@ impl RibSnapshot {
     }
 
     pub fn save_json(&self, path: impl AsRef<Path>) -> Result<()> {
-        let file = File::create(path.as_ref())
-            .with_context(|| format!("creating {}", path.as_ref().display()))?;
-        serde_json::to_writer(BufWriter::new(file), self)?;
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("creating {}", parent.display()))?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        {
+            let file = File::create(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+            serde_json::to_writer(BufWriter::new(file), self)
+                .with_context(|| format!("writing {}", tmp.display()))?;
+        }
+        std::fs::rename(&tmp, path)
+            .with_context(|| format!("renaming {} -> {}", tmp.display(), path.display()))?;
         Ok(())
     }
 
@@ -242,7 +252,14 @@ pub fn diff_snapshots(
     glue: &GlueSet,
     cfg: &DiffConfig,
 ) -> Vec<MaEvent> {
-    let subjects = org_map.subject_asns(glue, &cfg.heuristics);
+    let mut counts = before.prefix_count_by_origin();
+    for (asn, n) in after.prefix_count_by_origin() {
+        counts
+            .entry(asn)
+            .and_modify(|cur| *cur = (*cur).max(n))
+            .or_insert(n);
+    }
+    let subjects = org_map.subject_asns(glue, &cfg.heuristics, Some(&counts));
     let mut events = Vec::new();
     let ts = after.as_of;
 
@@ -259,8 +276,8 @@ pub fn diff_snapshots(
         if !(a_subject || b_subject) {
             continue;
         }
-        // Skip moves that are only glue↔glue.
-        if glue.contains(before_obs.origin_asn) && glue.contains(after_obs.origin_asn) {
+        // Glue is path context only: drop if either origin is glue.
+        if glue.contains(before_obs.origin_asn) || glue.contains(after_obs.origin_asn) {
             continue;
         }
         let org_a = org_map.org_for_asn(before_obs.origin_asn);
@@ -310,12 +327,8 @@ pub fn diff_snapshots(
         // Emit when a new upstream is itself a subject ASN (convergence toward another watchlist network)
         // or belongs to a mapped org.
         for up in new_upstreams {
-            if glue.contains(up) && !subjects.contains(&up) {
-                // Changing toward pure transit is weaker; still record if origin is subject
-                // only when the upstream maps to a non-glue org — skip pure glue.
-                if org_map.org_for_asn(up).is_none() || glue.contains(up) {
-                    continue;
-                }
+            if glue.contains(up) || glue.contains(*origin) {
+                continue;
             }
             let org_a = org_map.org_for_asn(*origin);
             let org_b = org_map.org_for_asn(up);
@@ -645,6 +658,58 @@ mod tests {
         assert!(events
             .iter()
             .any(|e| e.kind == MaEventKind::UpstreamConverge));
+    }
+
+    #[test]
+    fn prefix_move_drops_glue_counterparty() {
+        let mut map = OrgMap::new();
+        map.insert(OrgRecord {
+            org_id: "google".into(),
+            name: "Google".into(),
+            asns: vec![15169],
+            domains: vec!["google.com".into()],
+            prefix_count_hint: Some(10),
+            external_id: None,
+        });
+        map.insert(OrgRecord {
+            org_id: "acme".into(),
+            name: "Acme".into(),
+            asns: vec![65000],
+            domains: vec!["acme.com".into()],
+            prefix_count_hint: Some(10),
+            external_id: None,
+        });
+        let glue = GlueSet::from_text("15169\n").unwrap();
+        let mut before = RibSnapshot {
+            as_of: Utc.timestamp_opt(1, 0).unwrap(),
+            ts_start: None,
+            collector: None,
+            source: None,
+            prefixes: HashMap::new(),
+        };
+        before.prefixes.insert(
+            "203.0.113.0/24".into(),
+            PrefixObs {
+                origin_asn: 15169,
+                upstream_asn: None,
+                as_path: vec![15169],
+            },
+        );
+        let mut after = before.clone();
+        after.as_of = Utc.timestamp_opt(2, 0).unwrap();
+        after.prefixes.insert(
+            "203.0.113.0/24".into(),
+            PrefixObs {
+                origin_asn: 65000,
+                upstream_asn: None,
+                as_path: vec![65000],
+            },
+        );
+        let events = diff_snapshots(&before, &after, &map, &glue, &DiffConfig::default());
+        assert!(
+            !events.iter().any(|e| e.kind == MaEventKind::PrefixMove),
+            "glue counterparty must not emit prefix_move: {events:?}"
+        );
     }
 
     #[test]
