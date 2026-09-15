@@ -153,6 +153,8 @@ fn run_daily_after_open(
         info!(
             %day,
             sqlite = %sqlite.display(),
+            status = "snapshot_only",
+            duration_secs = (Utc::now() - started_at).num_seconds(),
             "no prior snapshot in state dir; retained today only (run again tomorrow for a diff)"
         );
         prune_snapshots(snap_dir, day, args.retain_days)?;
@@ -243,12 +245,14 @@ fn run_daily_after_open(
 
     info!(
         %day,
+        status = "ok",
         full_events = events.len(),
         sparse_events = sparse.len(),
         pairs = features.len(),
         cleaned_pairs = cleaned.len(),
         dropped_clean = dropped.len(),
         signals = signals.len(),
+        duration_secs = (Utc::now() - started_at).num_seconds(),
         prior = %prior_path.display(),
         sqlite = %sqlite.display(),
         signals_path = %signals_path.display(),

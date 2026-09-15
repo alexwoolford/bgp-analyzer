@@ -5,7 +5,7 @@ Documentation=file:///opt/bgp-analyzer/docs/DAILY_OPS.md
 [Timer]
 OnCalendar=*-*-* 02:30:00 UTC
 Persistent=true
-RandomizedDelaySec=5m
+RandomizedDelaySec=15m
 
 [Install]
 WantedBy=timers.target

@@ -67,22 +67,27 @@ install -m 0755 "$ROOT/scripts/run-refresh-org-map.sh" "$PREFIX/scripts/run-refr
 install -m 0644 "$ROOT/fixtures/glue-asns.txt" "$PREFIX/fixtures/glue-asns.txt"
 install -m 0644 "$ROOT/docs/DAILY_OPS.md" "$PREFIX/docs/DAILY_OPS.md"
 install -m 0644 "$ROOT/docs/ORG_MAP.md" "$PREFIX/docs/ORG_MAP.md"
+install -m 0644 "$ROOT/docs/CAPTURE.md" "$PREFIX/docs/CAPTURE.md"
 ENV_DST="$PREFIX/etc/bgp-analyzer.env"
+append_env_if_missing() {
+  local key="$1" value="$2"
+  if ! grep -qE "^${key}=" "$ENV_DST"; then
+    printf '\n%s=%s\n' "$key" "$value" >> "$ENV_DST"
+  fi
+}
 if [[ ! -f "$ENV_DST" ]]; then
-  install -m 0644 "$ROOT/deploy/bgp-analyzer.env.example" "$ENV_DST"
+  install -m 0600 "$ROOT/deploy/bgp-analyzer.env.example" "$ENV_DST"
 else
-  append_env_if_missing() {
-    local key="$1" value="$2"
-    if ! grep -qE "^${key}=" "$ENV_DST"; then
-      printf '\n%s=%s\n' "$key" "$value" >> "$ENV_DST"
-    fi
-  }
   append_env_if_missing STATE_CAPTURE_SOCK /run/state/collect.sock
   append_env_if_missing STATE_CAPTURE_ANNOUNCE_DIR /var/lib/state-capture/announce
+  append_env_if_missing RUST_LOG info
 fi
 
 chown -R "$USER_NAME:$GROUP_NAME" "$STATE"
 chown -R root:root "$PREFIX"
+chown root:"$GROUP_NAME" "$PREFIX/etc" "$ENV_DST"
+chmod 0750 "$PREFIX/etc"
+chmod 0600 "$ENV_DST"
 chmod 0755 "$PREFIX/scripts"/*.sh
 
 install -m 0644 "$ROOT/deploy/systemd/bgp-signals.service" /etc/systemd/system/bgp-signals.service
@@ -98,18 +103,19 @@ fi
 # Seed via systemd oneshot (survives SSH drop; TimeoutStartSec=2h). Do not
 # block install on PeeringDB HTTP — a foreground crawl dies with the session.
 systemctl daemon-reload
-systemctl enable --now bgp-org-map.timer
-# Do not --now the signals timer: Persistent=true would catch up before the
-# seed crawl finishes. The next 02:30 UTC fire (or a manual start) is correct.
+# Do not --now either timer: Persistent=true would catch up before the seed
+# crawl finishes. Seed is an explicit oneshot; the next calendar fire is correct.
+systemctl enable bgp-org-map.timer
 systemctl enable bgp-signals.timer
 echo "== seed org-map (systemd, non-blocking PeeringDB crawl) =="
 systemctl start --no-block bgp-org-map.service
 
 echo "installed:"
 echo "  prefix=$PREFIX state=$STATE"
-echo "  timers: bgp-org-map.timer (weekly, enabled now), bgp-signals.timer (daily, next 02:30 UTC)"
+echo "  timers: enabled (not started). After seed, or on next boot:"
+echo "    systemctl start bgp-org-map.timer bgp-signals.timer"
 echo "  seed: systemctl status bgp-org-map.service"
 echo "  logs: journalctl -u bgp-signals.service -u bgp-org-map.service"
 echo "  review: $STATE/signals/inbox.jsonl"
 echo "  sqlite: $STATE/bgp-analyzer.sqlite"
-echo "  edit: $PREFIX/etc/bgp-analyzer.env"
+echo "  edit: $PREFIX/etc/bgp-analyzer.env (chmod 600)"

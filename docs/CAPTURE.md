@@ -55,7 +55,7 @@ systemd oneshots write announce + nudge:
 - `TimeoutStartSec=2h`
 - Env: `STATE_CAPTURE_SOCK=/run/state/collect.sock`, `STATE_CAPTURE_ANNOUNCE_DIR=/var/lib/state-capture/announce`
 - `install.sh` adds `bgp` to group `state-capture` when that group exists (socket is `0660`)
-- `install.sh` enables `bgp-signals.timer` **without** `--now` so a Persistent catch-up cannot race the seed crawl
+- `install.sh` enables `bgp-org-map.timer` and `bgp-signals.timer` **without** `--now` so a Persistent catch-up cannot race the seed crawl
 
 Collector read access to `/var/lib/bgp-analyzer` is configured on the collector host, not in this crate. Do not watch a published copy.
 
