@@ -25,6 +25,8 @@ The ASN↔org↔domain map is **slowly changing reference data** for attribution
 
 PeeringDB HTTP is a **full** `/net` pagination every refresh (polite, not free). Sqlite/`_outbox` commit is change-aware: unchanged orgs emit no extra events. Weekly Sunday crawl is a conservative ops default (~2× the 14-day age gate), not a product requirement. Cadence knobs: `bgp-org-map.timer` and `ORG_MAP_MAX_AGE_DAYS`. Do not add incremental PeeringDB `?since=` unless the 2h oneshot is actually hurting.
 
+Anonymous PeeringDB cap is **20 req/min** (≥3.1s between queries in `bgp-map`). 429 / 5xx retry up to 12 times (`Retry-After` or exponential backoff). Declared UA: `bgp-analyzer/0.1 (research; real-data org-map builder)`. Do not raise the crawl rate to beat `TimeoutStartSec=2h`.
+
 | Cadence | Job | Behavior |
 |---------|-----|----------|
 | **Weekly** | `./scripts/run-refresh-org-map.sh` | Full PeeringDB crawl → work sqlite `orgs` / `org_map_runs`; dated JSON + `current` symlink is a local copy |
@@ -80,6 +82,8 @@ This is a lightweight batch emitter (daily RIB diff, weekly PeeringDB crawl), no
 
 Do **not** run production from a developer checkout under `$HOME` with ad-hoc cron. Use the `/opt` + `/var/lib` split below.
 
+Oneshot + timer. The OS is the scheduler. Operator logs: `tracing` on stderr → journald (`SyslogIdentifier=bgp-signals` / `bgp-org-map`). Default `RUST_LOG=info`.
+
 Host prerequisites: outbound HTTPS (BGPKIT broker, RouteViews, PeeringDB), Rust toolchain on the box (or copy a prebuilt binary into place), and disk for RIB snapshots (tens of GB over time; pruned via `--retain-days`).
 
 ### Install
@@ -96,10 +100,18 @@ Units shipped in [`deploy/systemd/`](../deploy/systemd/):
 
 | Unit | Schedule |
 |------|----------|
-| `bgp-org-map.timer` | Sunday 01:00 UTC (weekly PeeringDB refresh) |
-| `bgp-signals.timer` | Daily 02:30 UTC |
+| `bgp-org-map.timer` | Sunday 01:00 UTC + 15m jitter, `Persistent=true` |
+| `bgp-signals.timer` | Daily 02:30 UTC + 15m jitter, `Persistent=true` |
 
-Config: `/opt/bgp-analyzer/etc/bgp-analyzer.env` (from [`deploy/bgp-analyzer.env.example`](../deploy/bgp-analyzer.env.example)).
+Config: `/opt/bgp-analyzer/etc/bgp-analyzer.env` (from [`deploy/bgp-analyzer.env.example`](../deploy/bgp-analyzer.env.example), **chmod 600**). Install does not overwrite an existing env. `TimeoutStartSec=2h` on both oneshots.
+
+Install **enables** both timers without `--now` so `Persistent=true` cannot catch up and race the seed crawl. The seed org-map oneshot is started explicitly. Timers become active on the next boot; if this host will not reboot soon, start them after `org_map_runs` exists:
+
+```bash
+sudo systemctl start bgp-org-map.timer bgp-signals.timer
+```
+
+Starting `bgp-signals.timer` may immediately run today’s daily job (`Persistent=true`). That is safe once the org map is seeded (`run-daily-signals.sh` exits 0 if it is not).
 
 ```bash
 journalctl -u bgp-signals.service -u bgp-org-map.service -f
@@ -164,6 +176,37 @@ sudo -u bgp bash -lc 'set -a; source /opt/bgp-analyzer/etc/bgp-analyzer.env; set
 
 First day after install only stores a snapshot; the next UTC day (or a second pinned date) emits signals.
 
+## Timer failed
+
+`Persistent=true` will retry after a reboot. It will not page you. Do not hand-edit sqlite.
+
+1. `systemctl list-failed --no-pager` and `systemctl list-timers 'bgp-*'`.
+2. `journalctl -u bgp-signals.service -u bgp-org-map.service -n 80 --no-pager`.
+3. Query run tables (domain telemetry; also captured):
+
+```bash
+sudo -u bgp sqlite3 /var/lib/bgp-analyzer/bgp-analyzer.sqlite \
+  "SELECT as_of_date, status, signal_count, started_at, finished_at
+   FROM signal_runs ORDER BY as_of_date DESC LIMIT 5;"
+sudo -u bgp sqlite3 /var/lib/bgp-analyzer/bgp-analyzer.sqlite \
+  "SELECT as_of_date, org_count, started_at, finished_at
+   FROM org_map_runs ORDER BY as_of_date DESC LIMIT 5;"
+```
+
+4. Re-run: `sudo systemctl start bgp-org-map.service` and/or `sudo systemctl start bgp-signals.service`.
+
+Exit classes already in the wrappers and binary:
+
+| What you see | Meaning |
+|---|---|
+| Daily wrapper logs “org map not seeded yet” and **exit 0** | Missing `bgp-analyzer.sqlite` or empty `org_map_runs`. Wait for the seed crawl; not a unit failure. |
+| `signal_runs.status=snapshot_only` and **exit 0** | First UTC day (or no prior RIB file). Success; the next day diffs. |
+| `signal_runs.status=error` and unit **failed** | Daily job panicked/bailed after open; row is marked in `inspect_err`. |
+| `org map too old (…d > …d)` | `ORG_MAP_MAX_AGE_DAYS` gate (default 14). Start `bgp-org-map.service`. |
+| `already running (lock …)` and **exit 1** | `flock` overlap. Let the in-flight oneshot finish; do not start a second copy. |
+| PeeringDB `429` / 5xx then give-up after 12 retries | Rate limit or API outage. Unit failed; next timer or a manual start is the retry. |
+| Killed at **2h** | `TimeoutStartSec=2h`. Check RouteViews download size / PeeringDB crawl; do not drop the ≥3.1s interval. |
+
 ## State capture
 
 Work sqlite: `/var/lib/bgp-analyzer/bgp-analyzer.sqlite` (`db_name` `bgp-analyzer`). `capturable-state` v0.1.1 installs `_outbox` on `network_contact`, `orgs`, `signal_runs`, `org_map_runs`. JSONL under `signals/` is a post-commit review copy.
@@ -197,6 +240,6 @@ Under the state dir (`data/daily/` locally, `/var/lib/bgp-analyzer/` in producti
 - Glue, leasing, missing org ids, same PeeringDB org, and shared-domain families are suppressed; PeeringDB org ≠ ultimate parent, so residual intra-group noise can remain
 - Frozen sparse default: do not raise thresholds from lead-lag nulls
 - Daily RouteViews RIB is the expensive recurring job (not captured). `--focus-from-org-map` applies RIB prefix counts and origin-only retain; first install skips signals until `org_map_runs` exists
-- Install enables the signals **timer** without `--now` so a Persistent catch-up cannot race the seed crawl. `run-daily-signals.sh` exits 0 if the org map is not seeded yet.
+- Install enables both **timers** without `--now` so a Persistent catch-up cannot race the seed crawl. Seed is `systemctl start --no-block bgp-org-map.service`. `run-daily-signals.sh` exits 0 if the org map is not seeded yet.
 
 See [MA_SIGNAL.md](MA_SIGNAL.md), [ORG_MAP.md](ORG_MAP.md), and [BACKTEST.md](BACKTEST.md).

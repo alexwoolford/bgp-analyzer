@@ -35,13 +35,13 @@ pub enum Commands {
 #[derive(Debug, Parser)]
 pub struct BuildOrgMapArgs {
     /// Work sqlite directory (`bgp-analyzer.sqlite` is the system of record).
-    #[arg(long, default_value = "data/daily")]
+    #[arg(long, env = "BGP_DAILY_STATE", default_value = "data/daily")]
     pub state_dir: PathBuf,
     /// Optional JSON dump after sqlite commit (lossy local copy).
     #[arg(long)]
     pub output: Option<PathBuf>,
     /// Glue ASN suppress list (real public ASNs).
-    #[arg(long, default_value = "fixtures/glue-asns.txt")]
+    #[arg(long, env = "BGP_GLUE", default_value = "fixtures/glue-asns.txt")]
     pub glue: PathBuf,
     /// Cap PeeringDB `/net` pages (250 nets/page). Omit for full crawl.
     #[arg(long)]
@@ -164,12 +164,12 @@ pub struct BacktestArgs {
 #[derive(Debug, Parser)]
 pub struct DailyArgs {
     /// State directory (work sqlite + snapshots/ + events/ + signals/).
-    #[arg(long, default_value = "data/daily")]
+    #[arg(long, env = "BGP_DAILY_STATE", default_value = "data/daily")]
     pub state_dir: PathBuf,
     /// Calendar day to process (UTC), YYYY-MM-DD. Default: today UTC.
     #[arg(long)]
     pub date: Option<String>,
-    #[arg(long, default_value = "route-views2")]
+    #[arg(long, env = "BGP_COLLECTOR", default_value = "route-views2")]
     pub collector: String,
     /// Optional JSON org-map overlay / legacy merge on top of sqlite orgs.
     #[arg(long)]
@@ -178,9 +178,9 @@ pub struct DailyArgs {
     #[arg(long)]
     pub org_map_overlay: Option<PathBuf>,
     /// Refuse if `org_map_runs.finished_at` is older than this many days.
-    #[arg(long, default_value_t = 14)]
+    #[arg(long, env = "ORG_MAP_MAX_AGE_DAYS", default_value_t = 14)]
     pub org_map_max_age_days: i64,
-    #[arg(long)]
+    #[arg(long, env = "BGP_GLUE")]
     pub glue: Option<PathBuf>,
     /// Keep this many calendar days of snapshots (prune older).
     #[arg(long, default_value_t = 7)]

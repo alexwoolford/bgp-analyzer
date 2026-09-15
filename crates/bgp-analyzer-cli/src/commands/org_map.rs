@@ -40,6 +40,7 @@ pub fn run_build_org_map(args: BuildOrgMapArgs) -> Result<()> {
         sqlite = %sqlite.display(),
         orgs = commit.org_count,
         built_at = %commit.built_at,
+        duration_secs = (Utc::now() - started_at).num_seconds(),
         "committed PeeringDB org map"
     );
     Ok(())
